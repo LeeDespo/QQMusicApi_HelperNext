@@ -780,8 +780,8 @@ mod tests {
 
     #[test]
     fn search_highlight_markup_is_stripped() {
-        assert_eq!(strip_highlight("百听不厌的<em>周杰伦</em>"), "百听不厌的周杰伦");
-        assert_eq!(strip_highlight("无标记"), "无标记");
+        assert_eq!(strip_highlight("百听不厌的<em>周杰伦</em>".to_string()), "百听不厌的周杰伦");
+        assert_eq!(strip_highlight("无标记".to_string()), "无标记");
     }
 
     #[test]
