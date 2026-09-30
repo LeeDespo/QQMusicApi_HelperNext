@@ -1,0 +1,184 @@
+//! The values the component hands back.
+//!
+//! Every type is plain data with `serde` derives, which is what the language
+//! binding generator needs as well: `#[data]` in BoltFFI maps structs with
+//! primitive/String/Vec/Option fields directly, and these have nothing else.
+//! Field names are camelCase to match the JSON the CLI adapter emits, so one
+//! definition serves both surfaces.
+
+use serde::{Deserialize, Serialize};
+
+// `#[data]` is BoltFFI's marker for a type it can pass across the boundary: all
+// of these are primitives, Strings, Options and Vecs, which is what it needs.
+// The derive list stays because the same structs are the CLI adapter's models.
+use boltffi::data;
+
+/// One credited singer of a track.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Singer {
+    pub mid: Option<String>,
+    pub name: Option<String>,
+}
+
+/// A song, as the catalogue describes it.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Track {
+    pub song_id: Option<i64>,
+    /// The song's mid — the handle every other call takes.
+    pub song_mid: String,
+    pub media_mid: Option<String>,
+    pub title: String,
+    /// All credited singers, joined with `", "`.
+    pub artist: String,
+    pub album: Option<String>,
+    pub album_mid: Option<String>,
+    /// The numeric album id, which is what the album endpoints address.
+    pub album_id: Option<i64>,
+    /// The wire spells this `imageURL`, which `rename_all` alone would mangle.
+    #[serde(rename = "imageURL")]
+    pub image_url: Option<String>,
+    pub duration: Option<i64>,
+    /// `1` marks a track the account likely cannot play (subscription).
+    pub pay_play: Option<i64>,
+    pub singer_mid: Option<String>,
+    pub singers: Option<Vec<Singer>>,
+    /// Present when the source supplied it (artist "latest" ordering attaches it).
+    pub release_date: Option<String>,
+}
+
+/// The account's "我喜欢", with the folder's own total.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LikedSongs {
+    pub title: String,
+    pub total: i64,
+    pub tracks: Vec<Track>,
+}
+
+/// An album.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Album {
+    pub id: i64,
+    pub title: String,
+    pub album_mid: Option<String>,
+    #[serde(rename = "coverURL")]
+    pub cover_url: Option<String>,
+    pub artist: Option<String>,
+    pub release_date: Option<String>,
+}
+
+/// A playlist (the account's own, or one found by search).
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Playlist {
+    pub id: i64,
+    pub title: String,
+    #[serde(rename = "coverURL")]
+    pub cover_url: Option<String>,
+    pub creator: Option<String>,
+    pub song_count: Option<i64>,
+    pub play_count: Option<i64>,
+}
+
+/// A singer.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Artist {
+    pub singer_mid: String,
+    pub name: String,
+    #[serde(rename = "coverURL")]
+    pub cover_url: Option<String>,
+    pub song_count: Option<i64>,
+    pub album_count: Option<i64>,
+    pub fan_count: Option<i64>,
+}
+
+/// Who is logged in, as the upstream sees it.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginStatus {
+    pub logged_in: bool,
+    pub music_id: Option<i64>,
+    pub nickname: Option<String>,
+    pub vip_type: Option<i64>,
+    pub expired: Option<bool>,
+    /// Whether the playback ticket (`qm_keyst`) is present. Without it the CDN
+    /// refuses even tracks the account may play.
+    pub has_playback_key: Option<bool>,
+}
+
+impl LoginStatus {
+    pub fn is_vip(&self) -> bool {
+        self.vip_type.unwrap_or(0) > 0
+    }
+}
+
+/// What this component is and what it serves.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComponentInfo {
+    pub helper_version: String,
+    pub protocol_version: i64,
+    /// Kept for hosts that display a "library version"; this component replaces
+    /// the library, so it names the protocol work it is built from.
+    pub library_version: String,
+    pub methods: Vec<String>,
+}
+
+/// The state of the two politeness mechanisms, for the host to display.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardStatus {
+    /// `"closed"`, `"half-open"` or `"open"`.
+    pub breaker: String,
+    pub rate_limit: RateLimitUsage,
+}
+
+#[data]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RateLimitUsage {
+    pub read: u32,
+    pub interactive: u32,
+    pub playback: u32,
+    pub account: u32,
+    pub write: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The CLI adapter and the typed API must agree on names; this is the test
+    /// that fails if one of them is renamed alone.
+    #[test]
+    fn models_round_trip_the_camel_case_wire_shape() {
+        let track: Track = serde_json::from_value(serde_json::json!({
+            "songId": 12,
+            "songMid": "mid",
+            "title": "标题",
+            "artist": "甲, 乙",
+            "albumId": 4321,
+            "imageURL": "https://y.gtimg.cn/a.jpg",
+            "payPlay": 0,
+            "singers": [{"mid": "a", "name": "甲"}]
+        }))
+        .expect("decodes");
+        assert_eq!(track.song_mid, "mid");
+        assert_eq!(track.album_id, Some(4321));
+        assert_eq!(track.image_url.as_deref(), Some("https://y.gtimg.cn/a.jpg"));
+        assert_eq!(track.singers.as_ref().map(Vec::len), Some(1));
+    }
+}

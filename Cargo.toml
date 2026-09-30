@@ -1,0 +1,36 @@
+[package]
+name = "qqmusic-api-helper-next"
+description = "Cross-platform Rust component for the QQ Music API family (based on QQMusicApi)"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/LeeDespo/QQMusicApi_HelperNext"
+
+[lib]
+name = "qqmusic_api_helper_next"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+# Two binaries, one product:
+#   qqmusic-helper-next  — the line-based JSON adapter an app drives as a child
+#                          process (this is what the macOS player uses);
+#   qqmusic-helper-next-cli — a small human-facing CLI for poking the component
+#                          by hand while developing.
+[[bin]]
+name = "qqmusic-helper-next"
+path = "src/bin/stdio.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Blocking HTTP with rustls. The component answers one call at a time per host
+# thread, so an async runtime would buy nothing and would multiply the
+# dependency surface of something meant to be embedded in a phone app.
+ureq = { version = "3", features = ["json"] }
+# Bindings generator: `#[data]` on the models, `#[export]` on the API, then
+# `boltffi pack` emits Swift/Kotlin/Java/C#/TypeScript/Python bindings.
+boltffi = "0.31"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

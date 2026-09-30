@@ -1,0 +1,78 @@
+# 解析与坑
+
+上游响应的形状不统一，这一份记录**实测**出来的结论，避免后来的人重复踩。
+
+## 1. 平台档案决定成败
+
+`comm` 用 **web** 档案（`cv 4747474 / ct 24 / platform "yqq.json" / needNewCode 1`）。
+用 QQMusicApi 库的默认档案请求"我喜欢"会得到 `10004`；同一份凭据、同一个接口，换 web 档案就正常。
+**账号列表（我喜欢 / 我的歌单 / 收藏专辑 / 关注歌手）必须走 web 档案。**
+
+## 2. 我喜欢的曲目在 `songlist`，总数在 `dirinfo.songnum`
+
+`CgiGetDiss`（`dirid=201`，无 `disstid`）返回 `dirinfo`（`title`、`songnum`）与 `songlist`。
+歌单/排行榜用同一个方法、给 `disstid`，总数同样来自 `dirinfo.songnum`——
+这是"歌单只能显示前 100 首"的解药：知道总数才能判断"取完了没有"。
+
+## 3. 账号自己的歌单与收藏专辑只有老 fcgi 能取
+
+`music.musicasset.PlaylistBaseRead` 上的候选方法一律返回 `40000`。
+必须走 `GET c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg`，
+`userid` 用**数字 uin**，`reqtype` 3=歌单、2=专辑。
+返回的 `cdlist` 里混着保留目录：**没有 `dissid` 的那些要跳过**（我喜欢就是这样一个目录）。
+
+## 4. `pubtime` 是北京时间零点
+
+收藏专辑的 `pubtime` 是 Unix 时间戳，且**恰好是 16:00Z**（抽查八张全部如此，例如
+流浪地球 → `2019-02-04T16:00Z`）。按 UTC 渲染会让**每一张**专辑都早一天。
+本组件按 +08:00 换算（`album_release_date`），得到的就是服务里显示的日期。
+
+## 5. 大小写与命名
+
+* 关注歌手的列表键是 **`List`**（大写 L）。QQMusicApi 的模型里叫 `users`，照模型去找会以为"没有这个能力"。
+* `HostUin` 要的是**加密后的 uin**（`encrypt_uin`），不是数字 uin，库也不自己推导——凭据文件里有。
+* 曲目里歌手的**分隔符统一为 `", "`**；多个歌手就是多个 `singer` 元素，逐个映射成 `singers`。
+* 字段名在不同接口里不同（`mid`/`songmid`/`albummid`、`interval`/`duration`），
+  取值一律用 `upstream.rs` 的候选键工具，不要写死单键。
+
+## 6. 曲目字段（`decode_track` 的映射）
+
+| 输出 | 来源（按优先级） |
+|---|---|
+| `songMid` | `mid` / `songMid` / `songmid`（缺失→该条目丢弃） |
+| `songId` | `id` / `songId` / `songid` |
+| `title` | `name` / `title` / `songname` |
+| `artist` | `singer[].name` 用 `", "` 连接 |
+| `album` / `albumMid` | `album.name` / `album.mid` |
+| `albumId` | `album.id` / `album.albumId`（**数字**，专辑页要用它） |
+| `imageURL` | 由 `albumMid` 拼 `T002R800x800M000<mid>.jpg` |
+| `duration` | `interval` / `duration`（秒） |
+| `payPlay` | `pay.pay_play`（嵌套，不是扁平键） |
+
+## 7. 封面 URL 一律转 https
+
+上游会给 `http://y.gtimg.cn/...`、`http://qpic.y.qq.com/...` 以及协议相对的 `//qpic.y.qq.com/...`。
+宿主（macOS 应用没有 ATS 例外，Android 9+ 默认禁止明文）会直接拒绝 http 图片，
+表现为"封面静默空白"。所有封面都过 `normalized_artwork_url`。
+
+## 8. 每个响应都要回带请求的 `id`
+
+子进程适配器按 `id` 把响应配给请求。少写一个 `id` 不会报错，只会让对方**等到超时**
+（macOS 应用是 15 秒）。这一条在 Python 版上真的发生过：新方法输出 `{"ok":true,…}`，
+helper 单测全绿，接进应用就"卡 15 秒"。`with_id` 现在集中处理。
+
+## 9. 登录：`qm_keyst` 就是全部
+
+扫码登录与网页登录产出的都是 `uin` + `qm_keyst` 这一对；
+`g_tk = hash33(qm_keyst)` 由此推导，`qm_keyst` 同时就是 VIP 取流所需的播放票据。
+所以 `import_credential(uin:qm_keyst:)` 不需要别的 cookie。
+
+`GetLoginUserInfo` 的响应里，昵称在 `info.nick`（不是 `nickname`）；凭据被拒时要报成"未登录"，
+而不是抛错——那不是失败，是一种答案。
+
+## 10. 限流与熔断的位置
+
+组件是唯一看得见全部流量的地方，所以两个机制放在这里：
+按内容类别分桶的固定窗口（超限**等待**，因为每次调用都是用户看得见的读取），
+以及熔断（60 秒内 5 次失败开路 30 秒，半开只放一个探测）。
+`get_status` 把两者的状态暴露出来，便于回答"是我在限流自己，还是上游在拒绝我"。
