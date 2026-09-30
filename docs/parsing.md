@@ -83,12 +83,18 @@ helper 单测全绿，接进应用就"卡 15 秒"。`with_id` 现在集中处理
 下面三个接口都不是参数写错，而是**上游要求一个设备身份**（`qimei` / `qimei36` 等字段），
 QQMusicApi 的 `utils/device.py` 就是专门去取它并缓存、再塞进 `comm` 的：
 
+已查明设备标识不是"补一个字段"：`utils/qimei.py` 向 `api.tencentmusic.com/tme/trpc/proxy`
+POST 一个 **RSA 加密的 AES 密钥 + AES 加密的 payload**，依赖整套设备字段。所以这是一次独立的移植。
+
 | 接口 | 现象 |
 |---|---|
 | `music.search.SearchCgiService/DoSearchForQQMusicMobile` | `code 0`，`meta.sum = 0`（两个档案都一样） |
 | `music.radioProxy.MbTrackRadioSvr/get_radio_track`（猜你喜欢） | `code 1000`，`tracks: []`（两个档案都一样） |
 | `music.UnifiedHomepage.UnifiedHomepageSrv/GetHomepageHeader`（歌手资料） | `code 10000`，`Info.Singer` 每个字段都是空串，只有 `Info.FansNum/FollowNum/IP` 有值 |
+| `music.musicasset.PlaylistDetailWrite/AddSonglist`（收藏，唯一的写） | `code 1000`（五种参数形状都一样） |
 
 而**不需要**设备身份的接口（我喜欢、歌单、专辑、歌手歌曲/专辑、榜单、电台列表、新歌、取流）都正常。
-所以下一步应当**先实现设备标识**，它大概率一次性解锁这三条；在此之前
-`fetch_artist_detail` 明确报错而不是回一个"未知歌手"的假资料。
+所以下一步应当**先实现设备标识**，它大概率一次性解锁这四条；在此之前
+`fetch_artist_detail` 明确报错而不是回一个"未知歌手"的假资料，`set_liked` 返回上游错误码。
+
+歌词是**例外**且已解决：它不需要设备标识，换成明文 fcgi 路即可（见 `docs/endpoints.md`）。

@@ -574,42 +574,43 @@ pub fn recommend_feed(
 
 // MARK: - Lyrics
 
-/// A lyric, with the extra tracks the upstream offers alongside it.
+/// A lyric, in plaintext.
 ///
-/// All four fields arrive base64-encoded even in plaintext mode, and `qrc` is
-/// the word-level one — the reason the helper channel existed at all.
+/// Read through the legacy `c.y.qq.com` route with `nobase64=1`, which answers
+/// readable LRC directly. The `musicu.fcg` route
+/// (`music.musichallSong.PlayLyricInfo`) is **not** used: its payload is a
+/// custom Triple-DES variant, not the base64 plaintext its `crypt: 0` echo
+/// suggests, and porting that cipher is a liability when a plaintext route
+/// exists. The word-level (`qrc`) track is only available on the encrypted
+/// route, so `word_lyric` comes back empty — `docs/parsing.md` records this.
 pub fn lyric(
     upstream: &Upstream,
     credential: &Credential,
-    platform: Platform,
+    _platform: Platform,
     song_mid: &str,
-    song_id: Option<i64>,
-    with_word_timing: bool,
+    _song_id: Option<i64>,
+    _with_word_timing: bool,
     with_translation: bool,
 ) -> Result<Value, UpstreamError> {
-    let data = upstream.call_with(
-        credential,
-        crate::Class::Playback,
-        platform,
-        Call {
-            module: "music.musichallSong.PlayLyricInfo",
-            method: "GetPlayLyricInfo",
-            param: json!({
-                "songMID": song_mid,
-                "songID": song_id.unwrap_or(0),
-                "format": "json",
-                "crypt": 0,
-                "qrc": if with_word_timing { 1 } else { 0 },
-                "trans": if with_translation { 1 } else { 0 },
-                "roma": if with_translation { 1 } else { 0 },
-            }),
-        },
-    )?;
+    if song_mid.trim().is_empty() {
+        return Err(UpstreamError::Upstream("缺少 songMid".into()));
+    }
+    let url = format!(
+        "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={song_mid}&g_tk={gtk}\
+&format=json&inCharset=utf8&outCharset=utf-8&nobase64=1&platform=yqq.json&needNewCode=1",
+        gtk = credential.g_tk()
+    );
+    let data = upstream.get_fcgi(credential, crate::Class::Playback, &url)?;
+    let text = |key: &str| -> Option<String> {
+        first_text(&data, &[key])
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
     Ok(json!({
-        "lyric": decode_base64_text(data.get("lyric")),
-        "translation": decode_base64_text(data.get("trans")),
-        "romanization": decode_base64_text(data.get("roma")),
-        "wordLyric": decode_base64_text(data.get("qrc")),
+        "lyric": text("lyric"),
+        "translation": if with_translation { text("trans") } else { None },
+        "romanization": Option::<String>::None,
+        "wordLyric": Option::<String>::None,
     }))
 }
 
@@ -789,4 +790,39 @@ mod tests {
         assert!(content_group(&info, "intro").is_empty());
         assert_eq!(content_group(&info, "company"), vec!["某唱片"]);
     }
+}
+
+/// Add to, or remove from, "我喜欢".
+///
+/// The only write this component performs. It takes the song's *numeric* id
+/// (which every track payload carries) and its type; a caller holding only a
+/// mid resolves the id through [`song_detail`] first.
+pub fn set_liked(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    song_id: i64,
+    song_type: i64,
+    liked: bool,
+) -> Result<Value, UpstreamError> {
+    require_login(credential)?;
+    if song_id <= 0 {
+        return Err(UpstreamError::Upstream("需要 songId（数字）".into()));
+    }
+    upstream.call_with(
+        credential,
+        crate::Class::Write,
+        platform,
+        Call {
+            module: "music.musicasset.PlaylistDetailWrite",
+            method: if liked { "AddSonglist" } else { "DelSonglist" },
+            param: json!({
+                "dirId": 201,
+                "tid": 0,
+                "bFmtUtf8": true,
+                "v_songInfo": [{ "songId": song_id, "songType": song_type }],
+            }),
+        },
+    )?;
+    Ok(json!({ "songId": song_id, "liked": liked }))
 }

@@ -174,6 +174,19 @@ impl Upstream {
             .ok_or_else(|| UpstreamError::Upstream("响应里没有 data".into()))
     }
 
+    /// GET a legacy `c.y.qq.com` fcgi route and return the parsed object.
+    ///
+    /// Those routes answer with a JSON body that some of them wrap in a JSONP
+    /// callback, which is why the caller gets the whole object and not a slot.
+    pub fn get_fcgi(
+        &self,
+        credential: &Credential,
+        class: Class,
+        url: &str,
+    ) -> Result<Value, UpstreamError> {
+        self.get_json(credential, class, url)
+    }
+
     fn envelope(
         &self,
         credential: &Credential,

@@ -59,7 +59,7 @@
 
 剩下三条**不再是"不知道哪里错了"，而是各有明确成因**：
 
-### 1. 歌词：payload 是 3DES 加密的，不是 base64 明文
+### 1. 歌词 ✅ 已解决——换一条**明文**路走（不必移植 3DES）
 
 ```
 GetPlayLyricInfo {songMID, crypt:0, qrc:1}
@@ -67,10 +67,18 @@ GetPlayLyricInfo {songMID, crypt:0, qrc:1}
 → `lt_lyric` 为空；`lrc_t` / `qrc_t` / `trans_t` 是**时间戳**（名字里的 t 是 time，不是 text）
 ```
 
-`docs/parsing.md` 里"歌词四个字段是 base64"这句**只对一半**：它们是 base64 包着**密文**。
-QQMusicApi 的 `algorithms/tripledes.py` 有密钥与算法（Python 版就是靠它解出歌词的）。
-**修法**：把那个 3DES 解密移植过来（约 100 行，或用 `des`/`tripledes` crate + 同一把密钥）；
-在这之前，本组件的 `fetch_lyric` 返回的是不可用内容，**不要拿它当歌词用**。
+`musicu.fcg` 那条路的 payload 确实是密文（`crypt` 回 0 但内容是二进制，`lrc_t`/`qrc_t`/`trans_t` 是时间戳），
+**但没必要去移植那个自定义 3DES**：老的 fcgi 路直接给明文——
+
+```
+GET https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg
+    ?songmid=<mid>&g_tk=<hash33(musickey)>&format=json&inCharset=utf8&outCharset=utf-8
+    &nobase64=1&platform=yqq.json&needNewCode=1
+→ {"lyric": "[ti:不遗憾]\n[ar:李荣浩]…", "trans": "…"}
+```
+实测：1684 字符可读 LRC（`nobase64=1` 是明文的关键）。本组件现在就走这条。
+**代价**：**逐字（qrc）时间只有加密那条路有**，所以 `wordLyric` 目前回空——
+要逐字就得回来移植那个 3DES，这一条写在这里备查。
 
 ### 2. 猜你喜欢：`code=1000`、`tracks` 空 —— 与搜索同因（缺设备标识）
 
@@ -81,7 +89,7 @@ web 与 android 档案都一样。Python 版能取到（应用主页的精选卡
 **获取并携带 qimei 设备参数**（见 `utils/device.py`：它向上游要 qimei/qimei36 并缓存）。
 所以这一条与**搜索**是同一个工作项：**实现设备标识**。
 
-### 3. 歌手资料：接口换对了，但上游回空壳 —— 与搜索/推荐同因
+### 3. 歌手资料：接口换对了，但上游回空壳 —— 与搜索/推荐/写操作同因
 
 ```
 music.musichallSinger.SingerInfoInter / GetSingerDetail
@@ -95,6 +103,22 @@ music.UnifiedHomepage.UnifiedHomepageSrv / GetHomepageHeader  {"SingerMid": mid}
 库里的 `get_info()` 走的就是后者，参数与我发的一样，所以**不是参数问题**：
 它与搜索、猜你喜欢是同一类——**缺设备标识**（见 `docs/parsing.md` 第 11 条）。
 本组件现在把这种"空壳"直接报成错误，而不是渲染成「未知歌手」。
+
+### 4. 收藏（写）：`code 1000`，五种参数形状都一样 —— 与搜索/推荐同因
+
+```
+music.musicasset.PlaylistDetailWrite / AddSonglist
+  {"dirId":201,"tid":0,"bFmtUtf8":true,"v_songInfo":[{"songId":…,"songType":0/1}]}  → code 1000
+  省略 tid、dirId 用字符串、换 android 档案 …                                             全部 code 1000
+```
+写操作是上游最"保护"的一类，和搜索/推荐/歌手资料一样卡在**设备标识**上（Python 版之所以能写，
+是因为它的客户端带着 qimei 等设备参数）。所以本组件目前**不能收藏**——这正是为什么它还没有
+`set_liked` 的可用实现（代码在 `catalog::set_liked`，真跑返回上游码）。
+
+**设备标识的真实工作量**（已查明，比想象的深）：`utils/qimei.py` 要 POST
+`https://api.tencentmusic.com/tme/trpc/proxy`，请求体是 **RSA 加密一把随机 AES 密钥 + AES 加密 payload**
+的形式，并依赖一整套设备字段（IMEI、android_id、model、fingerprint、SDK 版本…）。
+这是一次独立的移植工作，不是"补个字段"。
 
 ## 状态
 

@@ -54,6 +54,8 @@ pub const METHODS: &[&str] = &[
     // Lyrics and playback urls.
     "fetch_lyric",
     "resolve_song_url",
+    // The one write.
+    "set_liked",
 ];
 
 pub fn is_known(method: &str) -> bool {
@@ -154,6 +156,15 @@ fn catalog_dispatch(
             params.get("translation").and_then(Value::as_bool).unwrap_or(true),
         )
         .map(|lyric| json!({ "lyric": lyric })),
+        "set_liked" => crate::catalog::set_liked(
+            upstream,
+            credential,
+            platform,
+            int("songId").unwrap_or(0),
+            int("songType").unwrap_or(0),
+            params.get("liked").and_then(Value::as_bool).unwrap_or(true),
+        )
+        .map(|result| json!({ "like": result })),
         "resolve_song_url" => crate::catalog::stream_url(
             upstream,
             credential,
@@ -485,7 +496,9 @@ pub fn decoded_tracks(data: &Value) -> Vec<Value> {
     // modelled from memory.
     let items = first_array(
         data,
-        &["songlist", "songList", "songs", "list", "tracks", "songInfoList"],
+        &[
+            "songlist", "songList", "songs", "list", "tracks", "track_list", "songInfoList",
+        ],
     )
     .cloned()
     .unwrap_or_default();
