@@ -123,23 +123,26 @@ music.musicasset.PlaylistDetailWrite / AddSonglist
 （`device.session_uid` / `session_sid` / `session_vkey`，由一次单独的登录步骤写入）。
 详见 `docs/parsing.md` 第 11 条。
 
-### 5. 扫码登录：二维码拿到了，轮询被 `403`
+### 5. 扫码登录：✅ 前两步已通（根因是 `hash33` 的种子）
 
 ```
-start_login  GET ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&…   ✅ 实测返回 PNG（432 字节，PNG 魔数正确）
-             + Set-Cookie: qrsig=<128 字符>                        ✅ 作为 identifier 回给调用方
-poll_login   GET ssl.ptlogin2.qq.com/ptqrlogin?ptqrtoken=hash33(qrsig)&…  ❌ HTTP 403
-             已带 Referer: https://xui.ptlogin2.qq.com/、Origin、浏览器 UA、qrsig cookie。
+start_login  GET ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&…       ✅ 真 PNG + Set-Cookie: qrsig
+poll_login   GET ssl.ptlogin2.qq.com/ptqrlogin?ptqrtoken=<hash33(qrsig, 0)>  ✅ {"event":"SCAN"}
 ```
 
-后续步骤（`check_sig` → `graph.qq.com/oauth2.0/authorize` → `QQConnectLogin.LoginServer/QQLogin`）
-代码已按库的实现写好，但**没有验证过**——它们只在扫码成功之后才会走到。
+**根因**：`ptqrtoken` 用的是 `hash33(qrsig)`，而库里的 `hash33(s, h=0)` **默认种子是 0**；
+`g_tk` 那处才是显式传 `5381`。我先前两处都用 5381，于是轮询一路 403——
+**403 是"参数错"的表现，而不是"权限不足"**。种子 0 → HTTP 200 + `ptuiCB('66',…)`；
+种子 5381 → 403。这条已作为组件的一条通用规则写进 `docs/parsing.md`。
 
-**排查方向**（下一步照做）：把 Python helper 的同一次轮询用抓包/日志记下完整请求头与 cookie 集合，
-与本组件的请求逐项比对。ptlogin2 的 403 通常来自缺 cookie（它可能要求 ptqrshow 之外的
-`pt_login_sig` 等）或缺 `Accept` / `Accept-Language` 这类浏览器头。
+排查过程中排除掉的因素（都试过，都不是原因）：Referer、Origin、浏览器 UA、账号 cookie、
+`Accept`/`Accept-Language`、cookie jar、HTTP/1.1 与 2、curl 作为对照客户端。
 
-## 状态
+**仍未验证**：扫码成功之后的 `check_sig` → `graph.qq.com/oauth2.0/authorize` → `QQLogin`
+三步（代码已按库实现写好，只有在有人真的扫码时才会执行）。请扫一次码验证，或等我在下一轮
+用一次真实扫码走完整条链。
+
+## 状态## 状态
 
 | 能力 | 方法名 | 上游 module / method | 参数要点 | 状态 |
 |---|---|---|---|---|

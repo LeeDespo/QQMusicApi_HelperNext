@@ -17,7 +17,7 @@
 //! returns is the identifier the caller hands back when polling, so no login
 //! state has to survive in the component (the Python helper did the same).
 
-use crate::credential::{hash33, Credential, CredentialStore};
+use crate::credential::{hash33, hash33_seeded, Credential, CredentialStore};
 use crate::upstream::{first_text, Platform, Upstream, UpstreamError};
 use base64::Engine;
 use serde_json::{json, Value};
@@ -127,7 +127,9 @@ pub fn poll_login(
     identifier: &str,
 ) -> Result<Value, UpstreamError> {
     let agent = upstream.login_agent();
-    let token = hash33(identifier);
+    // ptlogin's token starts from seed 0 — *not* the 5381 `g_tk` uses. The
+    // library's `hash33` defaults to 0 for precisely this call.
+    let token = hash33_seeded(identifier, 0);
     let url = format!(
         "{QR_POLL}?u1=https%3A%2F%2Fgraph.qq.com%2Foauth2.0%2Flogin_jump&ptqrtoken={token}\
 &ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052&action=0-0-{millis}&js_ver=20102616&js_type=1\

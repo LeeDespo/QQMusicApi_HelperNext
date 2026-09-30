@@ -10,14 +10,24 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-/// The `cgi-bin/musicu.fcg` request needs `g_tk` — `hash33` of the music key.
-/// Same algorithm the Python helper and the library use.
-pub fn hash33(key: &str) -> u32 {
-    let mut hash: u32 = 5381;
+/// `hash33` with an explicit seed.
+///
+/// The seed matters and is not always 5381: `g_tk` starts from 5381, while
+/// ptlogin's `ptqrtoken` starts from **0** — and getting that wrong is not a
+/// subtle failure, it is an HTTP 403 with no explanation (which is exactly how
+/// the QR login was broken until the library's own default was checked).
+pub fn hash33_seeded(key: &str, seed: u32) -> u32 {
+    let mut hash: u32 = seed;
     for ch in key.chars() {
         hash = hash.wrapping_shl(5).wrapping_add(hash).wrapping_add(ch as u32);
     }
     hash & 0x7FFF_FFFF
+}
+
+/// The `cgi-bin/musicu.fcg` request needs `g_tk` — `hash33` of the music key
+/// starting from 5381. Same algorithm the Python helper and the library use.
+pub fn hash33(key: &str) -> u32 {
+    hash33_seeded(key, 5381)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -185,6 +195,13 @@ pub fn credential_from_cookies(cookies: &Value) -> Option<Credential> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_seed_changes_the_hash() {
+        // The lesson that cost a round of 403s: these two are different numbers.
+        assert_ne!(hash33_seeded("qrsig-value", 0), hash33_seeded("qrsig-value", 5381));
+        assert_eq!(hash33("k"), hash33_seeded("k", 5381));
+    }
 
     #[test]
     fn gt_k_matches_the_librarys_hash33() {
