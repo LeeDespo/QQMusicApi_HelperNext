@@ -72,6 +72,22 @@ fn catalog_dispatch(
     method: &str,
     params: &Value,
 ) -> Option<Result<Value, UpstreamError>> {
+    // Four capabilities are answered only under the android profile, which is
+    // also the profile that carries the device identity: the artist header, the
+    // recommendation feed, the writes, and search. A caller can still ask for
+    // another profile explicitly (`params.platform`); these are the defaults
+    // that make them work at all.
+    let platform = if matches!(
+        method,
+        "fetch_artist_detail" | "fetch_recommend_feed" | "set_liked" | "search_songs"
+            | "search_artists" | "search_albums" | "search_playlists"
+    ) {
+        first_text(params, &["platform"])
+            .and_then(|value| Platform::parse(&value))
+            .unwrap_or(Platform::Android)
+    } else {
+        platform
+    };
     let text = |key: &str| first_text(params, &[key]).unwrap_or_default();
     let int = |key: &str| first_int(params, &[key]);
     let result = match method {

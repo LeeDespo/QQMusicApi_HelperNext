@@ -78,7 +78,33 @@ helper 单测全绿，接进应用就"卡 15 秒"。`with_id` 现在集中处理
 `get_status` 把两者的状态暴露出来，便于回答"是我在限流自己，还是上游在拒绝我"。
 
 
-## 11. 三个接口同因：缺"设备标识"（待办）
+## 11. 设备标识：已实现（qimei），但只解决了一半（2026-09-30 实测）
+
+`src/device.rs` 现在自己完成整套 QIMEI 握手：生成并持久化一个设备（IMEI/OpenUDID/android_id/
+机型/系统版本），用 RSA 包一把随机 AES 密钥、AES-CBC 加密设备档案、两处 MD5 签名，POST 到
+`api.tencentmusic.com/tme/trpc/proxy`，拿到 `q16`/`q36` 缓存 24 小时。**实测通**（拿到真实 q16/q36），
+并且密码学部分有单元测试钉住：MD5 已知摘要、AES-128-CBC 的 NIST SP 800-38A 向量。
+
+一个坑：库里的公钥是 PEM，但 `rsa` crate 的 PEM 读取路径拒收它（`openssl` 与 base64 都接受），
+所以改成直接内嵌 **DER 字节**（同一把密钥），绕开 PEM 解析。
+
+**结果分两半：**
+
+| 接口 | 有了设备标识之后 |
+|---|---|
+| `fetch_artist_detail`（歌手资料） | ✅ **修好**（android 档案 + `qq`/`authst` + 设备字段；实测 周杰伦） |
+| `search_*`（搜索四类） | ❌ 仍然 `meta.sum = 0`（**用真实 qimei 直连也一样**，所以不是 qimei 的事） |
+| `fetch_recommend_feed`（猜你喜欢） | ❌ 仍然 0 |
+| `set_liked`（收藏，写） | ❌ 仍然 `code 1000` |
+
+**下一个嫌疑：设备的"会话"（`uid`/`sid`/`vkey`）。** 依据有两条：
+① 库的 android 公共参数里除了 QIMEI 还带 `uid=device.session_uid`、`sid=device.session_sid`；
+② 它的设备存储里就有 `session_uid` / `session_sid` / `session_vkey` 三个字段，由一次
+**单独的登录步骤**写进去（`core/api_context.py` 里从某个 login 响应里取 uid/sid/vkey）。
+也就是说这些接口要的是"登录过的设备会话"，而不只是"设备指纹"。
+本组件目前发的是空 `uid`/`sid`——下一步就是把那次会话登录做出来。
+
+## 12. 历史记录：三个接口同因的排查过程（已由第 11 条取代）
 
 下面三个接口都不是参数写错，而是**上游要求一个设备身份**（`qimei` / `qimei36` 等字段），
 QQMusicApi 的 `utils/device.py` 就是专门去取它并缓存、再塞进 `comm` 的：

@@ -104,7 +104,7 @@ music.UnifiedHomepage.UnifiedHomepageSrv / GetHomepageHeader  {"SingerMid": mid}
 它与搜索、猜你喜欢是同一类——**缺设备标识**（见 `docs/parsing.md` 第 11 条）。
 本组件现在把这种"空壳"直接报成错误，而不是渲染成「未知歌手」。
 
-### 4. 收藏（写）：`code 1000`，五种参数形状都一样 —— 与搜索/推荐同因
+### 4. 收藏（写）：`code 1000` —— 有了 QIMEI 之后仍然如此
 
 ```
 music.musicasset.PlaylistDetailWrite / AddSonglist
@@ -115,10 +115,13 @@ music.musicasset.PlaylistDetailWrite / AddSonglist
 是因为它的客户端带着 qimei 等设备参数）。所以本组件目前**不能收藏**——这正是为什么它还没有
 `set_liked` 的可用实现（代码在 `catalog::set_liked`，真跑返回上游码）。
 
-**设备标识的真实工作量**（已查明，比想象的深）：`utils/qimei.py` 要 POST
-`https://api.tencentmusic.com/tme/trpc/proxy`，请求体是 **RSA 加密一把随机 AES 密钥 + AES 加密 payload**
-的形式，并依赖一整套设备字段（IMEI、android_id、model、fingerprint、SDK 版本…）。
-这是一次独立的移植工作，不是"补个字段"。
+**设备标识已实现**（`src/device.rs`：RSA+AES+MD5 的完整握手，实测拿到 q16/q36，设备持久化，
+密码学有 NIST/已知摘要的单测）。它**修好了歌手资料**（配合 android 档案与 comm 里的 `qq`/`authst`），
+但**没有**修好搜索、猜你喜欢与收藏写——即使用真实 qimei 直连也一样失败。
+
+**下一个嫌疑是设备"会话"**：库的 android 公共参数里还带 `uid`/`sid`
+（`device.session_uid` / `session_sid` / `session_vkey`，由一次单独的登录步骤写入）。
+详见 `docs/parsing.md` 第 11 条。
 
 ## 状态
 

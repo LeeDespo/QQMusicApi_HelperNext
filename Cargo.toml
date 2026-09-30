@@ -29,6 +29,16 @@ ureq = { version = "3", features = ["json"] }
 # Bindings generator: `#[data]` on the models, `#[export]` on the API, then
 # `boltffi pack` emits Swift/Kotlin/Java/C#/TypeScript/Python bindings.
 boltffi = "0.31"
+# The device identity the upstream gates some interfaces on: its service wants an
+# RSA-wrapped AES key, so the component carries the crypto it takes to ask.
+aes = "0.8"
+cbc = "0.1"
+# `alloc` is what gives the block-mode helpers their Vec-based padding API.
+cipher = { version = "0.4", features = ["alloc"] }
+rsa = { version = "0.9", features = ["pem"] }
+md5 = "0.7"
+base64 = "0.22"
+rand = "0.8"
 
 [profile.release]
 opt-level = 3

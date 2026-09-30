@@ -36,6 +36,7 @@
 //! behind mutexes, and no call holds a lock across the network.
 
 mod catalog;
+pub mod device;
 mod guard;
 pub mod methods;
 mod upstream;

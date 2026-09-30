@@ -11,6 +11,7 @@
 //! Both are exercised with the account's cookies; `g_tk` is `hash33(qm_keyst)`.
 
 use crate::credential::Credential;
+use crate::device::DeviceStore;
 use crate::guard::{Class, CircuitBreaker, RateLimit};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -84,6 +85,9 @@ pub struct Upstream {
     agent: ureq::Agent,
     pub limiter: RateLimit,
     pub breaker: CircuitBreaker,
+    /// Generated once and kept beside the credential. Consulted only for the
+    /// android profile, whose interfaces are the ones that want a device.
+    device: DeviceStore,
 }
 
 #[derive(Debug)]
@@ -107,14 +111,27 @@ impl std::fmt::Display for UpstreamError {
 
 impl Upstream {
     pub fn new() -> Self {
+        Self::with_device(DeviceStore::for_directory(&crate::data_directory()))
+    }
+
+    pub fn with_device(device: DeviceStore) -> Self {
         Self {
             agent: ureq::Agent::config_builder()
-                .timeout_global(Some(Duration::from_secs(12)))
+                // The QIMEI handshake can be slower than a catalogue read, and it
+                // happens once a day; the ordinary calls keep the tighter bound
+                // through the per-request timeout below.
+                .timeout_global(Some(Duration::from_secs(20)))
                 .build()
                 .into(),
             limiter: RateLimit::new(Duration::from_secs(10)),
             breaker: CircuitBreaker::default(),
+            device,
         }
+    }
+
+    /// The device the component presents, and the identity it has for it.
+    pub fn device(&self) -> &DeviceStore {
+        &self.device
     }
 
     /// Run one `req_0` call and return its `data` object, under the web profile.
@@ -205,6 +222,40 @@ impl Upstream {
         comm.insert("g_tk".into(), json!(credential.g_tk()));
         for (key, value) in platform.comm_overlay() {
             comm.insert(key.into(), value);
+        }
+        if platform == Platform::Android {
+            // The android profile authenticates *in the body* as well as with
+            // cookies — this is what the library sends, and the interfaces that
+            // refused every other shape (the artist header, search, the feed and
+            // the writes) accept this one.
+            if !credential.music_id.is_empty() {
+                comm.insert("qq".into(), json!(credential.music_id));
+            }
+            if !credential.music_key.is_empty() {
+                comm.insert("authst".into(), json!(credential.music_key));
+            }
+            comm.insert("tmeAppID".into(), json!("qqmusic"));
+            comm.insert("tmeLoginType".into(), json!(1));
+            comm.insert("chid".into(), json!("10003505"));
+            let device = self.device.load_or_create();
+            comm.insert("OpenUDID".into(), json!(device.open_udid));
+            comm.insert("OpenUDID2".into(), json!(device.open_udid));
+            comm.insert("udid".into(), json!(device.open_udid));
+            comm.insert("aid".into(), json!(device.android_id));
+            comm.insert("os_ver".into(), json!(device.os_version_text()));
+            comm.insert("phonetype".into(), json!(device.model));
+            comm.insert("devicelevel".into(), json!(device.os_sdk));
+            comm.insert("newdevicelevel".into(), json!(device.os_sdk));
+            comm.insert("rom".into(), json!(device.proc_version));
+            // Empty strings when the identity could not be fetched: every
+            // interface that does not need it still works, and the ones that do
+            // answer with their own error rather than a transport failure.
+            let (q16, q36) = self
+                .device
+                .qimei(&self.agent)
+                .unwrap_or_else(|| (String::new(), String::new()));
+            comm.insert("QIMEI".into(), json!(q16));
+            comm.insert("QIMEI36".into(), json!(q36));
         }
         let mut body = json!({ "comm": comm });
         for (index, call) in calls.into_iter().enumerate() {
