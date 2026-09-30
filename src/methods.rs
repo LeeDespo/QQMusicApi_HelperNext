@@ -22,7 +22,7 @@ pub const COMPONENT_VERSION: &str = "0.1.0";
 pub const PROTOCOL_VERSION: i32 = 2;
 /// The library the old helper shipped, reported so both components answer
 /// `get_helper_info` with the same field set.
-const LIBRARY_VERSION: &str = "qqmusic-api-python 0.7.3 (replaced by this component)";
+const LIBRARY_VERSION: &str = "HelperNext (Rust, 无 Python 依赖)";
 /// "我喜欢" lives in the reserved folder with this id.
 const LIKED_SONGS_DIRID: i64 = 201;
 
@@ -37,6 +37,17 @@ pub const METHODS: &[&str] = &[
     "fetch_followed_artists",
     "fetch_playlist_tracks",
     "get_status",
+    "set_rate_limit",
+    "set_breaker",
+    "aria2_status",
+    "aria2_restart",
+    "aria2_configure",
+    "aria2_add",
+    "aria2_tell",
+    "aria2_list",
+    "aria2_pause",
+    "aria2_unpause",
+    "aria2_cancel",
     // Catalogue prose, an artist's works and an album's tracks.
     "fetch_song_detail",
     "fetch_album_detail",
@@ -56,6 +67,11 @@ pub const METHODS: &[&str] = &[
     "resolve_song_url",
     // The one write.
     "set_liked",
+    // The local library's enrichment (cover matching, artist biography).
+    "search_track_artwork",
+    "search_artist_artwork",
+    "search_album_artwork",
+    "fetch_artist_biography",
     // Search, one kind per method.
     "search_songs",
     "search_artists",
@@ -89,6 +105,13 @@ fn catalog_dispatch(
         method,
         "fetch_artist_detail" | "fetch_recommend_feed" | "set_liked" | "search_songs"
             | "search_artists" | "search_albums" | "search_playlists"
+            // The enrichment calls search underneath, so they need the same
+            // profile — and the biography reads the artist header.
+            | "search_track_artwork" | "search_artist_artwork" | "search_album_artwork"
+            | "fetch_artist_biography"
+            // The vkey grant is tied to the device session: the same track comes
+            // back at 320 under this profile and at 128 under the web one.
+            | "resolve_song_url"
     ) {
         first_text(params, &["platform"])
             .and_then(|value| Platform::parse(&value))
@@ -99,14 +122,35 @@ fn catalog_dispatch(
     let text = |key: &str| first_text(params, &[key]).unwrap_or_default();
     let int = |key: &str| first_int(params, &[key]);
     let result = match method {
-        "fetch_song_detail" => crate::catalog::song_detail(upstream, credential, platform, &text("songMid")),
+        // The two "detail" reads answer under `detail` — the app decodes that
+        // key, and a payload without it is a reply the app cannot use at all.
+        // Both also accept a name-only request: the local library's enrichment
+        // has no mid to give.
+        "fetch_song_detail" => crate::catalog::song_detail(
+            upstream,
+            credential,
+            platform,
+            crate::catalog::SongDetailQuery {
+                song_mid: first_text(params, &["songMid"]).as_deref(),
+                title: &text("title"),
+                artist: &text("artist"),
+                album: &text("album"),
+                duration: int("duration"),
+            },
+        )
+        .map(|detail| json!({ "detail": detail })),
         "fetch_album_detail" => crate::catalog::album_detail(
             upstream,
             credential,
             platform,
-            first_text(params, &["albumMid"]).as_deref(),
-            int("albumId"),
-        ),
+            crate::catalog::AlbumDetailQuery {
+                album_mid: first_text(params, &["albumMid"]).as_deref(),
+                album_id: int("albumId"),
+                album: &text("album"),
+                artist: &text("artist"),
+            },
+        )
+        .map(|detail| json!({ "detail": detail })),
         "fetch_album_tracks" => crate::catalog::album_tracks(
             upstream,
             credential,
@@ -137,8 +181,16 @@ fn catalog_dispatch(
             round(int("limit"), 50, 1, 100),
         )
         .map(|albums| json!({ "albums": albums })),
-        "fetch_artist_detail" => crate::catalog::artist_detail(upstream, credential, platform, &text("singerMid"))
-            .map(|detail| json!({ "detail": detail })),
+        "fetch_artist_detail" => crate::catalog::artist_detail(
+            upstream,
+            credential,
+            platform,
+            // `name` and `artist` are the spellings the app and the old helper
+            // used; either may be the only thing a caller has.
+            &first_text(params, &["name", "artist"]).unwrap_or_default(),
+            first_text(params, &["singerMid", "mid"]).as_deref(),
+        )
+        .map(|detail| json!({ "detail": detail })),
         "fetch_toplist_categories" => crate::catalog::toplist_categories(upstream, credential, platform)
             .map(|groups| json!({ "toplistGroups": groups })),
         "fetch_toplist_tracks" => crate::catalog::toplist_tracks(
@@ -149,7 +201,7 @@ fn catalog_dispatch(
             int("offset").unwrap_or(0),
             round(int("limit"), 100, 1, 300),
         )
-        .map(|tracks| json!({ "tracks": tracks })),
+        .map(|(tracks, total)| json!({ "tracks": tracks, "total": total })),
         "fetch_radio_stations" => crate::catalog::radio_stations(upstream, credential, platform)
             .map(|groups| json!({ "radioGroups": groups })),
         "fetch_radio_tracks" => crate::catalog::radio_tracks(
@@ -165,7 +217,9 @@ fn catalog_dispatch(
             upstream,
             credential,
             platform,
-            int("regionType").unwrap_or(0),
+            int("regionType")
+                .or_else(|| first_text(params, &["region"]).and_then(|name| new_song_region(&name)))
+                .unwrap_or(0),
         )
         .map(|tracks| json!({ "tracks": tracks })),
         "fetch_recommend_feed" => crate::catalog::recommend_feed(upstream, credential, platform)
@@ -180,6 +234,44 @@ fn catalog_dispatch(
             params.get("translation").and_then(Value::as_bool).unwrap_or(true),
         )
         .map(|lyric| json!({ "lyric": lyric })),
+        // The local library's enrichment: cover candidates and biographies.
+        "search_track_artwork" => crate::catalog::search_track_artwork(
+            upstream,
+            credential,
+            platform,
+            &text("title"),
+            &text("artist"),
+            &text("album"),
+            round(int("limit"), 5, 1, 10),
+        )
+        .map(|candidates| json!({ "candidates": candidates })),
+        "search_artist_artwork" => crate::catalog::search_artist_artwork(
+            upstream,
+            credential,
+            platform,
+            &text("name"),
+            round(int("limit"), 5, 1, 10),
+        )
+        .map(|candidates| json!({ "candidates": candidates })),
+        "search_album_artwork" => crate::catalog::search_album_artwork(
+            upstream,
+            credential,
+            platform,
+            &text("album"),
+            &text("artist"),
+            round(int("limit"), 5, 1, 10),
+        )
+        .map(|candidates| json!({ "candidates": candidates })),
+        "fetch_artist_biography" => crate::catalog::artist_biography(
+            upstream,
+            credential,
+            platform,
+            &first_text(params, &["name", "artist"]).unwrap_or_default(),
+            first_text(params, &["singerMid"]).as_deref(),
+        )
+        // `artistDetail`, not `detail`: the app reads the artist page's prose
+        // out of this key, and the Python helper answered with it.
+        .map(|detail| json!({ "artistDetail": detail })),
         "search_songs" | "search_artists" | "search_albums" | "search_playlists" => {
             let kind = match method {
                 "search_songs" => crate::catalog::SearchKind::Songs,
@@ -237,6 +329,19 @@ fn catalog_dispatch(
     Some(result)
 }
 
+/// The region names the app uses, mapped to the upstream's numeric `type`.
+fn new_song_region(name: &str) -> Option<i64> {
+    match name.to_ascii_lowercase().as_str() {
+        "latest" | "all" => Some(0),
+        "mainland" | "cn" => Some(1),
+        "hongkong" | "taiwan" | "hktw" => Some(2),
+        "western" | "eu" | "us" => Some(3),
+        "japan" | "jp" => Some(4),
+        "korea" | "kr" => Some(5),
+        _ => None,
+    }
+}
+
 fn round(value: Option<i64>, default: i64, low: i64, high: i64) -> i64 {
     value.unwrap_or(default).clamp(low, high)
 }
@@ -280,12 +385,23 @@ pub fn dispatch(
         // unanswerable from outside.
         "get_status" => Ok(json!({
             "status": {
+                "breakerConfig": {
+                    "enabled": upstream.breaker.config().enabled,
+                    "failureThreshold": upstream.breaker.config().failure_threshold,
+                    "failureWindowSeconds": upstream.breaker.config().failure_window.as_secs(),
+                    "openSeconds": upstream.breaker.config().open_for.as_secs(),
+                },
                 "breaker": match upstream.breaker.state() {
                     crate::guard::BreakerState::Closed => "closed",
                     crate::guard::BreakerState::HalfOpen => "half-open",
                     crate::guard::BreakerState::Open { .. } => "open",
                 },
                 "rateLimit": {
+                    "config": {
+                        "enabled": upstream.limiter.config().enabled,
+                        "windowSeconds": upstream.limiter.config().window.as_secs(),
+                        "maxRequests": upstream.limiter.config().max_calls,
+                    },
                     "read": upstream.limiter.usage(Class::Read),
                     "interactive": upstream.limiter.usage(Class::Interactive),
                     "playback": upstream.limiter.usage(Class::Playback),
@@ -302,9 +418,164 @@ pub fn dispatch(
         "fetch_liked_albums" => Ok(json!({ "albums": liked_albums(upstream, &account, params)? })),
         "fetch_user_playlists" => Ok(json!({ "playlists": user_playlists(upstream, &account, params)? })),
         "fetch_followed_artists" => Ok(json!({ "artists": followed_artists(upstream, &account, params)? })),
-        "fetch_playlist_tracks" => Ok(json!({ "tracks": playlist_tracks(upstream, &account, params)? })),
+        "fetch_playlist_tracks" => {
+            let (tracks, total) = playlist_tracks(upstream, &account, params)?;
+            Ok(json!({ "tracks": tracks, "total": total }))
+        }
         other => Err(UpstreamError::Upstream(format!("不支持的方法：{other}"))),
     }
+}
+
+/// Apply the user's request-rate ceiling.
+///
+/// A settings push rather than an upstream call: it answers from the component's
+/// own state, and the app sends it on startup and whenever the numbers change.
+/// The numbers are clamped so a typo cannot stop the component from reading at
+/// all (`max: 0`) or make the window absurd.
+pub fn configure_rate_limit(upstream: &Upstream, params: &Value) -> Value {
+    let enabled = params
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let window_seconds = first_int(params, &["windowSeconds", "window"])
+        .unwrap_or(10)
+        .clamp(1, 3_600);
+    let max_requests = first_int(params, &["maxRequests", "max"])
+        .unwrap_or(100)
+        .clamp(1, 100_000);
+    upstream.limiter.configure(crate::guard::RateLimitConfig {
+        enabled,
+        window: std::time::Duration::from_secs(window_seconds as u64),
+        max_calls: max_requests as u32,
+    });
+    json!({
+        "rateLimit": {
+            "enabled": enabled,
+            "windowSeconds": window_seconds,
+            "maxRequests": max_requests,
+        }
+    })
+}
+
+/// Apply the user's circuit-breaker numbers.
+///
+/// Same shape as [`configure_rate_limit`]: a settings push answered from the
+/// component's own state, clamped so a typo cannot disable recovery entirely
+/// (`threshold: 0` would open the circuit on the first failure).
+///
+/// The call shape, for whoever wires this up next:
+///
+/// ```json
+/// {"id":"1","method":"set_breaker","params":{
+///   "enabled": true, "failureThreshold": 3,
+///   "failureWindowSeconds": 120, "openSeconds": 300}}
+/// {"id":"1","ok":true,"breaker":{"enabled":true,"failureThreshold":3,
+///   "failureWindowSeconds":120,"openSeconds":300}}
+/// ```
+pub fn configure_breaker(upstream: &Upstream, params: &Value) -> Value {
+    let enabled = params.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+    let failure_threshold = first_int(params, &["failureThreshold", "threshold"])
+        .unwrap_or(5)
+        .clamp(1, 100);
+    let failure_window_seconds = first_int(params, &["failureWindowSeconds", "failureWindow"])
+        .unwrap_or(60)
+        .clamp(1, 3_600);
+    let open_seconds = first_int(params, &["openSeconds", "openFor"])
+        .unwrap_or(30)
+        .clamp(1, 3_600);
+    upstream.breaker.configure(crate::guard::BreakerConfig {
+        enabled,
+        failure_threshold: failure_threshold as u32,
+        failure_window: std::time::Duration::from_secs(failure_window_seconds as u64),
+        open_for: std::time::Duration::from_secs(open_seconds as u64),
+    });
+    json!({
+        "breaker": {
+            "enabled": enabled,
+            "failureThreshold": failure_threshold,
+            "failureWindowSeconds": failure_window_seconds,
+            "openSeconds": open_seconds,
+        }
+    })
+}
+
+/// The download engine's state, in one object.
+///
+/// `ensure` as a parameter rather than always starting the daemon: the settings
+/// page wants to *report* ("installed, not running") without spawning anything,
+/// while a download wants it up. Starting a background process as a side effect
+/// of opening a settings window would be surprising.
+pub fn aria2_status(upstream: &Upstream, params: &Value) -> Result<Value, UpstreamError> {
+    let ensure = params.get("ensure").and_then(Value::as_bool).unwrap_or(false);
+    if ensure {
+        upstream.aria2.ensure_running()?;
+    }
+    Ok(json!({ "aria2": upstream.aria2.status() }))
+}
+
+/// Stop the engine and start it again — the settings page's 重启 button.
+pub fn aria2_restart(upstream: &Upstream) -> Result<Value, UpstreamError> {
+    upstream.aria2.restart()?;
+    Ok(json!({ "aria2": upstream.aria2.status() }))
+}
+
+/// Apply the user's numbers (split, concurrency, rate limits).
+///
+/// Takes effect immediately when the engine is already up, so changing a number
+/// does not restart anything and does not disturb a download in flight.
+pub fn aria2_configure(upstream: &Upstream, params: &Value) -> Value {
+    let options = crate::aria2::options_from_params(params);
+    upstream.aria2.configure(options.clone());
+    json!({ "aria2": upstream.aria2.status() })
+}
+
+/// Queue one file for download, addressed by the URL the catalogue granted.
+///
+/// `out` is the file name inside the engine's directory; the app picks it so the
+/// imported track is named the way the rest of the pipeline expects.
+pub fn aria2_add(upstream: &Upstream, params: &Value) -> Result<Value, UpstreamError> {
+    let url = first_text(params, &["url"]).unwrap_or_default();
+    if url.trim().is_empty() {
+        return Err(UpstreamError::Upstream("缺少 url".into()));
+    }
+    let out = first_text(params, &["out"]).unwrap_or_default();
+    if out.trim().is_empty() || out.contains('/') {
+        return Err(UpstreamError::Upstream("out 必须是文件名".into()));
+    }
+    let gid = upstream.aria2.add(&url, &out)?;
+    Ok(json!({ "download": { "gid": gid } }))
+}
+
+/// One download's progress, for the app to poll while it waits.
+pub fn aria2_tell(upstream: &Upstream, params: &Value) -> Result<Value, UpstreamError> {
+    let gid = first_text(params, &["gid"]).unwrap_or_default();
+    if gid.trim().is_empty() {
+        return Err(UpstreamError::Upstream("缺少 gid".into()));
+    }
+    Ok(json!({ "download": upstream.aria2.tell(&gid)? }))
+}
+
+/// Every task the engine holds, for the toolbar's download list.
+pub fn aria2_list(upstream: &Upstream) -> Result<Value, UpstreamError> {
+    Ok(json!({ "downloads": upstream.aria2.list()? }))
+}
+
+/// Pause / resume / cancel: one task when `gid` is given, all of them when not.
+///
+/// Cancel also deletes the partial file — the app's own words for it ("取消的同时
+/// 删除临时文件"), and the reason it is not just `aria2.remove`.
+pub fn aria2_control(upstream: &Upstream, method: &str, params: &Value) -> Result<Value, UpstreamError> {
+    let gid = first_text(params, &["gid"]).filter(|value| !value.is_empty());
+    match method {
+        "aria2_pause" => upstream.aria2.pause(gid.as_deref())?,
+        "aria2_unpause" => upstream.aria2.unpause(gid.as_deref())?,
+        "aria2_cancel" => {
+            let removed = upstream.aria2.cancel(gid.as_deref())?;
+            return Ok(json!({ "removed": removed, "downloads": upstream.aria2.list()? }));
+        }
+        other => return Err(UpstreamError::Upstream(format!("不支持的方法：{other}"))),
+    }
+    Ok(json!({ "downloads": upstream.aria2.list()? }))
 }
 
 /// A credential built from imported cookies, for the caller to persist.
@@ -398,13 +669,19 @@ fn playlist_tracks(
     upstream: &Upstream,
     credential: &Credential,
     params: &Value,
-) -> Result<Vec<Value>, UpstreamError> {
+) -> Result<(Vec<Value>, Option<i64>), UpstreamError> {
     require_login(credential)?;
     let disstid = first_int(params, &["songlistId", "disstid", "id"])
         .or_else(|| first_int(params, &["topId"]))
         .ok_or_else(|| UpstreamError::Upstream("缺少 songlistId".into()))?;
     let limit = first_int(params, &["limit"]).unwrap_or(100).clamp(1, 200);
-    let offset = first_int(params, &["offset", "song_begin"]).unwrap_or(0).max(0);
+    // The app asks for a *page*; `song_begin` is an offset. An explicit offset
+    // wins; otherwise the page is turned into one — reading only `offset` is how
+    // every page after the first came back as the first page again.
+    let offset = match first_int(params, &["offset", "song_begin"]) {
+        Some(explicit) => explicit.max(0),
+        None => (first_int(params, &["page"]).unwrap_or(1).max(1) - 1) * limit,
+    };
     let data = upstream.call(
         credential,
         Class::Account,
@@ -422,7 +699,12 @@ fn playlist_tracks(
             }),
         },
     )?;
-    Ok(decoded_tracks(&data))
+    // `dirinfo.songnum` is the list's real size; without it the app can only
+    // report how many rows it happens to hold and stop paging there.
+    let total = first_object(&data, &["dirinfo"])
+        .and_then(|info| first_int(info, &["songnum", "song_num", "total"]))
+        .or_else(|| first_int(&data, &["total_song_num", "songnum"]));
+    Ok((decoded_tracks(&data), total))
 }
 
 /// The account's own playlists (created and favorited), through the legacy fcgi.
@@ -492,8 +774,17 @@ fn followed_artists(
     params: &Value,
 ) -> Result<Vec<Value>, UpstreamError> {
     require_login(credential)?;
-    if credential.encrypted_uin.is_empty() {
-        return Err(UpstreamError::Upstream("凭据里没有 encrypt_uin".into()));
+    // `HostUin` addressed the account by its encrypted uin in the library, which
+    // is why a credential without one looked like a broken feature. The endpoint
+    // itself takes the *numeric* id just as happily (verified live: same rows,
+    // same account) — so the credential's `encrypt_uin` is used when it exists and
+    // the music id otherwise, and 关注歌手 no longer depends on a login field the
+    // current login flow does not produce.
+    let host_uin = upstream
+        .encrypted_uin(credential)
+        .unwrap_or_else(|_| credential.music_id.clone());
+    if host_uin.is_empty() {
+        return Err(UpstreamError::Upstream("这个凭据没有可用的账号标识".into()));
     }
     let limit = first_int(params, &["limit"]).unwrap_or(30).clamp(1, 100);
     let page = first_int(params, &["page"]).unwrap_or(1).max(1);
@@ -504,7 +795,7 @@ fn followed_artists(
             module: "music.concern.RelationList",
             method: "GetFollowSingerList",
             param: json!({
-                "HostUin": credential.encrypted_uin,
+                "HostUin": host_uin,
                 "From": (page - 1) * limit,
                 "Size": limit,
             }),

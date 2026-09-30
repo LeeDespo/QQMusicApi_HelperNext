@@ -35,6 +35,7 @@
 //! HTTP agent, the rate limiter, the breaker and the credential store are shared
 //! behind mutexes, and no call holds a lock across the network.
 
+mod aria2;
 mod catalog;
 pub mod device;
 mod guard;
@@ -50,6 +51,7 @@ pub use guard::{BreakerState, Class};
 pub use upstream::Platform;
 pub use credential::CredentialStore;
 pub use upstream::{Upstream, UpstreamError};
+pub use aria2::{Aria2, Aria2Options};
 pub use methods::{COMPONENT_VERSION, PROTOCOL_VERSION};
 pub use models::*;
 

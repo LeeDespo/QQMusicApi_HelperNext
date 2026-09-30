@@ -157,6 +157,17 @@ mod tests {
             ("import_cookies", "import_credential"),
             ("get_helper_info", "component_info"),
             ("get_status", "guard_status"),
+            ("set_rate_limit", "set_rate_limit"),
+            ("set_breaker", "set_breaker"),
+            ("aria2_tell", "aria2_tell"),
+            ("aria2_cancel", "aria2_cancel"),
+            ("aria2_unpause", "aria2_unpause"),
+            ("aria2_pause", "aria2_pause"),
+            ("aria2_list", "aria2_list"),
+            ("aria2_add", "aria2_add"),
+            ("aria2_configure", "aria2_configure"),
+            ("aria2_restart", "aria2_restart"),
+            ("aria2_status", "aria2_status"),
             ("get_login_status", "login_status"),
             ("fetch_liked_songs", "liked_songs"),
             ("fetch_playlist_tracks", "playlist_tracks"),
@@ -169,6 +180,10 @@ mod tests {
             ("fetch_artist_songs", "artist_songs"),
             ("fetch_artist_albums", "artist_albums"),
             ("fetch_artist_detail", "artist_detail"),
+            ("fetch_artist_biography", "fetch_artist_biography"),
+            ("search_track_artwork", "search_track_artwork"),
+            ("search_artist_artwork", "search_artist_artwork"),
+            ("search_album_artwork", "search_album_artwork"),
             ("fetch_toplist_categories", "toplist_categories"),
             ("fetch_toplist_tracks", "toplist_tracks"),
             ("fetch_radio_stations", "radio_stations"),
@@ -424,4 +439,156 @@ pub fn search_albums(keyword: String, page: i64, limit: i64) -> Result<crate::mo
 #[export]
 pub fn search_playlists(keyword: String, page: i64, limit: i64) -> Result<crate::models::PlaylistSearch, HelperError> {
     call("search_playlists", json!({ "keyword": keyword, "page": page, "limit": limit }))
+}
+
+// MARK: - The local library's enrichment
+
+/// Cover candidates for a local track (the host scores them).
+#[export]
+pub fn search_track_artwork(
+    title: String,
+    artist: String,
+    album: String,
+    limit: i64,
+) -> Result<Vec<crate::models::ArtworkCandidate>, HelperError> {
+    call(
+        "search_track_artwork",
+        json!({ "title": title, "artist": artist, "album": album, "limit": limit }),
+    )
+}
+
+/// Cover candidates for a local artist.
+#[export]
+pub fn search_artist_artwork(
+    name: String,
+    limit: i64,
+) -> Result<Vec<crate::models::ArtworkCandidate>, HelperError> {
+    call("search_artist_artwork", json!({ "name": name, "limit": limit }))
+}
+
+/// Cover candidates for a local album.
+#[export]
+pub fn search_album_artwork(
+    album: String,
+    artist: String,
+    limit: i64,
+) -> Result<Vec<crate::models::ArtworkCandidate>, HelperError> {
+    call("search_album_artwork", json!({ "album": album, "artist": artist, "limit": limit }))
+}
+
+/// Apply the user's request-rate ceiling.
+///
+/// A configuration push rather than a read: the app sends it on startup and
+/// whenever the settings change, so the numbers survive a component restart.
+#[export]
+pub fn set_rate_limit(
+    enabled: bool,
+    window_seconds: i64,
+    max_requests: i64,
+) -> Result<crate::models::RateLimitConfigModel, HelperError> {
+    call(
+        "set_rate_limit",
+        json!({
+            "enabled": enabled,
+            "windowSeconds": window_seconds,
+            "maxRequests": max_requests,
+        }),
+    )
+}
+
+/// Apply the user's circuit-breaker numbers.
+#[export]
+pub fn set_breaker(
+    enabled: bool,
+    failure_threshold: i64,
+    failure_window_seconds: i64,
+    open_seconds: i64,
+) -> Result<crate::models::BreakerConfigModel, HelperError> {
+    call(
+        "set_breaker",
+        json!({
+            "enabled": enabled,
+            "failureThreshold": failure_threshold,
+            "failureWindowSeconds": failure_window_seconds,
+            "openSeconds": open_seconds,
+        }),
+    )
+}
+
+/// The download engine's state. `ensure` starts it when it is not up.
+#[export]
+pub fn aria2_status(ensure: bool) -> Result<crate::models::Aria2Status, HelperError> {
+    call("aria2_status", json!({ "ensure": ensure }))
+}
+
+/// Restart the download engine.
+#[export]
+pub fn aria2_restart() -> Result<crate::models::Aria2Status, HelperError> {
+    call("aria2_restart", json!({}))
+}
+
+/// Apply the download engine's numbers.
+#[export]
+pub fn aria2_configure(
+    split: i64,
+    max_connection_per_server: i64,
+    max_concurrent_downloads: i64,
+    min_split_size_mib: i64,
+    max_overall_download_limit_kib: i64,
+) -> Result<crate::models::Aria2Status, HelperError> {
+    call(
+        "aria2_configure",
+        json!({
+            "split": split,
+            "maxConnectionPerServer": max_connection_per_server,
+            "maxConcurrentDownloads": max_concurrent_downloads,
+            "minSplitSizeMiB": min_split_size_mib,
+            "maxOverallDownloadLimitKiB": max_overall_download_limit_kib,
+        }),
+    )
+}
+
+/// Queue one file.
+#[export]
+pub fn aria2_add(url: String, out: String) -> Result<crate::models::Aria2Download, HelperError> {
+    call("aria2_add", json!({ "url": url, "out": out }))
+}
+
+/// One download's progress.
+#[export]
+pub fn aria2_tell(gid: String) -> Result<crate::models::Aria2Download, HelperError> {
+    call("aria2_tell", json!({ "gid": gid }))
+}
+
+/// Every task the engine holds.
+#[export]
+pub fn aria2_list() -> Result<crate::models::Aria2TaskList, HelperError> {
+    call("aria2_list", json!({}))
+}
+
+/// Pause one task (or all when `gid` is empty).
+#[export]
+pub fn aria2_pause(gid: Option<String>) -> Result<crate::models::Aria2TaskList, HelperError> {
+    call("aria2_pause", json!({ "gid": gid }))
+}
+
+/// Resume one task (or all).
+#[export]
+pub fn aria2_unpause(gid: Option<String>) -> Result<crate::models::Aria2TaskList, HelperError> {
+    call("aria2_unpause", json!({ "gid": gid }))
+}
+
+/// Cancel one task (or all), deleting the partial files.
+#[export]
+pub fn aria2_cancel(gid: Option<String>) -> Result<crate::models::Aria2TaskList, HelperError> {
+    call("aria2_cancel", json!({ "gid": gid }))
+}
+
+/// An artist's biography.
+#[export]
+pub fn fetch_artist_biography(
+    name: String,
+    singer_mid: Option<String>,
+) -> Result<crate::models::ArtistBiography, HelperError> {
+    call("fetch_artist_biography", json!({ "name": name, "singerMid": singer_mid }))
 }

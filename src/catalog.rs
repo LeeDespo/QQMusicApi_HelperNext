@@ -35,6 +35,81 @@ const RESULT_NO_PERMISSION: i64 = 104003;
 const RESULT_VKEY_FAILED: i64 = 104004;
 const RESULT_DEVICE_RESTRICTED: i64 = 104013;
 
+/// The provenance the Python helper stamped on every enrichment payload. The
+/// app reads these keys (and refuses a detail whose confidence is too low), so
+/// they are part of the protocol, not decoration.
+const SOURCE: &str = "qqmusic";
+
+/// The profile a search has to run under.
+///
+/// Not a style choice: only the android envelope carries the device identity the
+/// search endpoint wants, and every other profile answers `meta.sum = 0` — an
+/// empty catalogue that looks exactly like "no such song". The detail reads
+/// below reach for the search whenever they were given a name instead of a mid,
+/// so they must ask under this profile even though the read itself does not.
+const SEARCH_PLATFORM: Platform = Platform::Android;
+
+/// `2026-09-30T12:34:56Z` — the shape `_utc_now_iso` produced, which the app's
+/// date decoder accepts.
+fn utc_now_iso() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let (year, month, day, hour, minute, second) = civil_from_unix(seconds as i64);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+/// Days-since-epoch to a calendar date (Howard Hinnant's `civil_from_days`).
+///
+/// Written out rather than pulled in: the component exists to keep its
+/// dependency surface small, and this is the one date it has to print.
+fn civil_from_unix(seconds: i64) -> (i64, i64, i64, i64, i64, i64) {
+    let days = seconds.div_euclid(86_400);
+    let time = seconds.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+    (year, month, day, time / 3600, (time % 3600) / 60, time % 60)
+}
+
+/// The four provenance keys, merged into a payload.
+fn with_provenance(mut payload: Value, confidence: f64) -> Value {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("source".into(), json!(SOURCE));
+        object.insert("metadataSource".into(), json!(SOURCE));
+        object.insert("metadataFetchedAt".into(), json!(utc_now_iso()));
+        object.insert("metadataConfidence".into(), json!(confidence));
+        object.insert("confidence".into(), json!(confidence));
+    }
+    payload
+}
+
+/// The top search hit's field, or an empty string.
+fn candidate_text(candidate: &Value, key: &str) -> String {
+    candidate
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// A candidate's confidence, defaulting the way the Python helper did.
+fn candidate_confidence(candidate: &Value, fallback: f64) -> f64 {
+    candidate
+        .get("confidence")
+        .and_then(Value::as_f64)
+        .filter(|value| *value > 0.0)
+        .unwrap_or(fallback)
+}
+
 fn require_login(credential: &Credential) -> Result<(), UpstreamError> {
     if credential.is_usable() {
         Ok(())
@@ -61,6 +136,25 @@ fn content_group(value: &Value, key: &str) -> Vec<String> {
 
 // MARK: - Song and album prose
 
+/// What the caller knows about the song it wants prose for.
+///
+/// The app asks for this both from the online pages (a mid in hand) and from the
+/// local library's enrichment (a title/artist/album off a file's tags and no mid
+/// at all), so a name-only request resolves the mid through the search first —
+/// exactly what the Python helper did, and the reason this method cannot simply
+/// demand a mid.
+#[derive(Debug, Clone, Default)]
+pub struct SongDetailQuery<'a> {
+    pub song_mid: Option<&'a str>,
+    pub title: &'a str,
+    pub artist: &'a str,
+    pub album: &'a str,
+    /// Sent by the app and ignored here, exactly as the Python helper ignored
+    /// it: the catalogue's search does not rank by duration.
+    #[allow(dead_code)]
+    pub duration: Option<i64>,
+}
+
 /// The catalogue's own prose about a song, plus the facts the same request
 /// carries (`info.intro`, `info.company`, `info.genre`, `info.lan`,
 /// `info.pub_time`).
@@ -68,11 +162,60 @@ pub fn song_detail(
     upstream: &Upstream,
     credential: &Credential,
     platform: Platform,
-    song_mid: &str,
+    query: SongDetailQuery<'_>,
 ) -> Result<Value, UpstreamError> {
-    if song_mid.trim().is_empty() {
-        return Err(UpstreamError::Upstream("缺少 songMid".into()));
+    let mut song_mid = query.song_mid.unwrap_or_default().trim().to_string();
+    let mut matched_title = query.title.trim().to_string();
+    let mut matched_artist = query.artist.trim().to_string();
+    let mut matched_album = query.album.trim().to_string();
+    let mut image_url = String::new();
+    let mut album_mid = String::new();
+    let mut confidence = 0.90;
+
+    if song_mid.is_empty()
+        && !(matched_title.is_empty() && matched_artist.is_empty() && matched_album.is_empty())
+    {
+        let candidates = search_track_artwork(
+            upstream,
+            credential,
+            SEARCH_PLATFORM,
+            &matched_title,
+            &matched_artist,
+            &matched_album,
+            1,
+        )?;
+        if let Some(top) = candidates.first() {
+            song_mid = candidate_text(top, "songMid");
+            album_mid = candidate_text(top, "albumMid");
+            let title = candidate_text(top, "title");
+            let artist = candidate_text(top, "artist");
+            let album = candidate_text(top, "album");
+            if !title.is_empty() {
+                matched_title = title;
+            }
+            if !artist.is_empty() {
+                matched_artist = artist;
+            }
+            if !album.is_empty() {
+                matched_album = album;
+            }
+            image_url = candidate_text(top, "imageURL");
+            confidence = candidate_confidence(top, confidence);
+        }
     }
+    if song_mid.is_empty() {
+        // Two different situations: nothing was given to search with, or the
+        // search ran and matched nothing. The second one is a miss, not a bug,
+        // and saying so saves the next person the same debugging round.
+        return Err(UpstreamError::Upstream(
+            if matched_title.is_empty() && matched_artist.is_empty() && matched_album.is_empty() {
+                "songMid 或 title/artist/album 至少要有一个".into()
+            } else {
+                format!("找不到匹配的歌曲：{}", [matched_title.as_str(), matched_artist.as_str(), matched_album.as_str()].iter().filter(|part| !part.is_empty()).cloned().collect::<Vec<_>>().join(" "))
+            },
+        ));
+    }
+
     let data = upstream.call_with(
         credential,
         crate::Class::Read,
@@ -84,24 +227,60 @@ pub fn song_detail(
         },
     )?;
     let info = first_object(&data, &["info"]).cloned().unwrap_or(json!({}));
-    let track = first_object(&data, &["track_info"]).cloned().unwrap_or(json!({}));
+    let track = first_object(&data, &["track_info", "track"]).cloned().unwrap_or(json!({}));
     let album = first_object(&track, &["album"]).cloned().unwrap_or(json!({}));
-    Ok(json!({
-        "songMid": song_mid,
-        "songId": first_int(&track, &["id", "songId"]),
-        "title": first_text(&track, &["name", "title"]),
-        "artist": first_text(&track, &["singer_name"]),
-        "album": first_text(&album, &["name"]),
-        "albumMid": first_text(&album, &["mid"]),
-        // The intro is a list of paragraphs; most songs have none at all, which
-        // is an answer rather than a failure.
-        "description": content_group(&info, "intro").join("\n"),
-        "genre": content_group(&info, "genre"),
-        "language": content_group(&info, "lan").first().cloned(),
-        "company": content_group(&info, "company").first().cloned(),
-        "releaseDate": content_group(&info, "pub_time").first().cloned(),
-        "duration": first_int(&track, &["interval"]),
-    }))
+    if album_mid.is_empty() {
+        album_mid = first_text(&album, &["mid", "albumMid"]).unwrap_or_default();
+    }
+    let release_date = content_group(&info, "pub_time")
+        .first()
+        .cloned()
+        .or_else(|| first_text(&track, &["time_public", "timePublic"]));
+    let cover_url = if !image_url.is_empty() {
+        image_url.clone()
+    } else if !album_mid.is_empty() {
+        crate::methods::album_cover_url(&album_mid)
+    } else {
+        String::new()
+    };
+    let cover = crate::methods::normalized_artwork_url(
+        Some(cover_url.as_str()).filter(|value| !value.is_empty()),
+    );
+    // The intro is a list of paragraphs; most songs have none at all, which is
+    // an answer rather than a failure.
+    let genres: Vec<String> = content_group(&info, "genre")
+        .into_iter()
+        .flat_map(split_tags)
+        .collect();
+
+    Ok(with_provenance(
+        json!({
+            "title": strip_highlight(first_text(&track, &["name", "title"]).unwrap_or(matched_title)),
+            "artist": strip_highlight(first_text(&track, &["singer_name", "singer"]).unwrap_or(matched_artist)),
+            "album": strip_highlight(first_text(&album, &["name", "title"]).unwrap_or(matched_album)),
+            "songMid": song_mid,
+            "albumMid": album_mid,
+            "imageURL": cover,
+            "description": content_group(&info, "intro").join("\n"),
+            "genreTags": genres,
+            "language": content_group(&info, "lan").first().cloned(),
+            "labelOrCompany": content_group(&info, "company").first().cloned(),
+            "releaseDate": release_date,
+            "duration": first_int(&track, &["interval", "duration", "durationSec"]),
+            // Kept for the online pages, which were reading these.
+            "songId": first_int(&track, &["id", "songId"]),
+        }),
+        confidence,
+    ))
+}
+
+/// What the caller knows about the album it wants prose for.
+#[derive(Debug, Clone, Default)]
+pub struct AlbumDetailQuery<'a> {
+    pub album_mid: Option<&'a str>,
+    pub album_id: Option<i64>,
+    pub album: &'a str,
+    pub artist: &'a str,
 }
 
 /// An album's own prose and metadata.
@@ -109,18 +288,58 @@ pub fn album_detail(
     upstream: &Upstream,
     credential: &Credential,
     platform: Platform,
-    album_mid: Option<&str>,
-    album_id: Option<i64>,
+    query: AlbumDetailQuery<'_>,
 ) -> Result<Value, UpstreamError> {
+    let mut album_mid = query.album_mid.unwrap_or_default().trim().to_string();
+    let mut matched_album = query.album.trim().to_string();
+    let mut matched_artist = query.artist.trim().to_string();
+    let mut image_url = String::new();
+    let mut confidence = 0.90;
+
+    // A local album has a title and an artist and no mid — resolve one.
+    if album_mid.is_empty() && !(matched_album.is_empty() && matched_artist.is_empty()) {
+        let candidates = search_album_artwork(
+            upstream,
+            credential,
+            SEARCH_PLATFORM,
+            &matched_album,
+            &matched_artist,
+            1,
+        )?;
+        if let Some(top) = candidates.first() {
+            album_mid = candidate_text(top, "albumMid");
+            let album = candidate_text(top, "album");
+            let artist = candidate_text(top, "artist");
+            if !album.is_empty() {
+                matched_album = album;
+            }
+            if !artist.is_empty() {
+                matched_artist = artist;
+            }
+            image_url = candidate_text(top, "imageURL");
+            confidence = candidate_confidence(top, confidence);
+        }
+    }
+
     let mut param = serde_json::Map::new();
-    match (album_mid, album_id) {
-        (Some(mid), _) if !mid.trim().is_empty() => {
+    match (album_mid.as_str(), query.album_id) {
+        (mid, _) if !mid.is_empty() => {
             param.insert("albumMId".into(), json!(mid));
         }
         (_, Some(id)) => {
             param.insert("albumId".into(), json!(id));
         }
-        _ => return Err(UpstreamError::Upstream("需要 albumMid 或 albumId".into())),
+        _ => {
+            return Err(UpstreamError::Upstream(
+                if matched_album.is_empty() && matched_artist.is_empty() {
+                    "需要 albumMid、albumId 或 album/artist".into()
+                } else {
+                    format!("找不到匹配的专辑：{} {}", matched_album, matched_artist)
+                        .trim()
+                        .to_string()
+                },
+            ))
+        }
     }
     let data = upstream.call_with(
         credential,
@@ -137,27 +356,59 @@ pub fn album_detail(
     let album = first_object(&data, &["basicInfo", "albumInfo", "album", "data"])
         .cloned()
         .unwrap_or(data.clone());
+    if album_mid.is_empty() {
+        album_mid = first_text(&album, &["albumMid", "albumMId", "mid"]).unwrap_or_default();
+    }
     // The upstream usually gives a cover url; when it does not, the album mid
     // builds one (the same pattern every other cover uses).
     let cover = {
         let explicit = first_text(&album, &["pic", "cover", "coverURL"]);
-        let built = first_text(&album, &["albumMid", "albumMId", "mid"])
-            .map(|mid| crate::methods::album_cover_url(&mid));
-        crate::methods::normalized_artwork_url(explicit.or(built).as_deref())
+        let built =
+            (!album_mid.is_empty()).then(|| crate::methods::album_cover_url(&album_mid));
+        crate::methods::normalized_artwork_url(
+            explicit
+                .or(built)
+                .or(Some(image_url.clone()).filter(|value| !value.is_empty()))
+                .as_deref(),
+        )
     };
-    Ok(json!({
-        "id": first_int(&album, &["albumId", "id"]),
-        "albumMid": first_text(&album, &["albumMid", "albumMId", "mid"]),
-        "title": first_text(&album, &["albumName", "name", "title"]),
-        "artist": first_text(&album, &["singerName", "singer_name", "artist"]),
-        "coverURL": cover,
-        "description": first_text(&album, &["desc", "description", "intro"]),
-        "releaseDate": first_text(&album, &["publishDate", "time_public", "pubTime"]),
-        "genre": first_text(&album, &["genre", "genreName"]),
-        "language": first_text(&album, &["lan", "language"]),
-        "company": first_text(&album, &["company", "label"]),
-        "songCount": first_int(&album, &["songNum", "songnum", "totalNum"]),
-    }))
+    let release_date = first_text(&album, &["publishDate", "time_public", "pubTime"]);
+
+    Ok(with_provenance(
+        json!({
+            "album": strip_highlight(first_text(&album, &["albumName", "name", "title"]).unwrap_or(matched_album)),
+            "artist": strip_highlight(first_text(&album, &["singerName", "singer_name", "artist"]).unwrap_or(matched_artist)),
+            "albumMid": album_mid,
+            "imageURL": cover,
+            "description": first_text(&album, &["desc", "description", "intro"]),
+            "releaseDate": release_date,
+            "releaseYear": release_date.as_deref().and_then(release_year),
+            "albumType": first_text(&album, &["album_type", "albumType"]),
+            "genreTags": first_text(&album, &["genre", "genreName", "tag"])
+                .map(split_tags)
+                .unwrap_or_default(),
+            "language": first_text(&album, &["lan", "language"]),
+            "labelOrCompany": first_text(&album, &["company", "label"]),
+            // Kept for the online pages, which were reading these.
+            "id": first_int(&album, &["albumId", "id"]),
+            "coverURL": cover,
+            "title": strip_highlight(first_text(&album, &["albumName", "name", "title"]).unwrap_or_default()),
+            "songCount": first_int(&album, &["songNum", "songnum", "totalNum"]),
+        }),
+        confidence,
+    ))
+}
+
+/// The year out of a release date, however the upstream spells it.
+fn release_year(date: &str) -> Option<i64> {
+    let digits: String = date
+        .chars()
+        .skip_while(|ch| !ch.is_ascii_digit())
+        .take_while(char::is_ascii_digit)
+        .collect();
+    (digits.len() >= 4)
+        .then(|| digits[..4].parse().ok())
+        .flatten()
 }
 
 /// The tracks of an album, addressed by mid or numeric id.
@@ -321,8 +572,47 @@ pub fn artist_detail(
     upstream: &Upstream,
     credential: &Credential,
     platform: Platform,
-    singer_mid: &str,
+    name: &str,
+    singer_mid: Option<&str>,
 ) -> Result<Value, UpstreamError> {
+    let mut mid = singer_mid.unwrap_or_default().trim().to_string();
+    let mut matched_name = name.trim().to_string();
+    let mut matched_region = String::new();
+    let mut matched_foreign_name = String::new();
+    let mut matched_genres: Vec<String> = Vec::new();
+    let mut image_url = String::new();
+    let mut confidence = 0.90;
+
+    // The local library knows an artist by name; the header needs a mid.
+    if mid.is_empty() && !matched_name.is_empty() {
+        let candidates =
+            search_artist_artwork(upstream, credential, SEARCH_PLATFORM, &matched_name, 1)?;
+        if let Some(top) = candidates.first() {
+            mid = candidate_text(top, "singerMid");
+            let name = candidate_text(top, "artistName");
+            if !name.is_empty() {
+                matched_name = name;
+            }
+            matched_region = candidate_text(top, "region");
+            matched_foreign_name = candidate_text(top, "foreignName");
+            matched_genres = top
+                .get("genreTags")
+                .and_then(Value::as_array)
+                .map(|tags| {
+                    tags.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            image_url = candidate_text(top, "imageURL");
+            confidence = candidate_confidence(top, confidence);
+        }
+    }
+    if mid.is_empty() {
+        return Err(UpstreamError::Upstream("singerMid 或 name 至少要有一个".into()));
+    }
+
     let data = upstream.call_with(
         credential,
         crate::Class::Read,
@@ -330,7 +620,7 @@ pub fn artist_detail(
         Call {
             module: "music.UnifiedHomepage.UnifiedHomepageSrv",
             method: "GetHomepageHeader",
-            param: json!({ "SingerMid": singer_mid }),
+            param: json!({ "SingerMid": mid }),
         },
     )?;
     let info = first_object(&data, &["Info", "info"]).cloned().unwrap_or(json!({}));
@@ -340,8 +630,8 @@ pub fn artist_detail(
     // field blank, only the stats filled in). Returning that as a profile would
     // put 未知歌手 on screen for an artist that exists, so it is reported as the
     // missing-device-identity case it looks like (see `docs/parsing.md`).
-    let name = first_text(&singer, &["Name", "name"]);
-    if name.is_none() && first_text(&singer, &["SingerMid", "mid"]).is_none() {
+    let header_name = first_text(&singer, &["Name", "name"]);
+    if header_name.is_none() && first_text(&singer, &["SingerMid", "mid"]).is_none() {
         return Err(UpstreamError::Upstream(
             "上游返回了空的歌手资料（与搜索、推荐同因：可能缺设备标识）".into(),
         ));
@@ -350,24 +640,50 @@ pub fn artist_detail(
         let explicit = first_text(&singer, &["SingerPic", "Pic", "pic"]);
         let built = first_text(&singer, &["SingerMid", "Mid", "mid"])
             .map(|mid| crate::methods::singer_cover_url(&mid));
-        crate::methods::normalized_artwork_url(explicit.or(built).as_deref())
+        crate::methods::normalized_artwork_url(
+            explicit
+                .or(built)
+                .or(Some(image_url.clone()).filter(|value| !value.is_empty()))
+                .as_deref(),
+        )
     };
-    Ok(json!({
-        "singerMid": singer_mid,
-        "name": name.unwrap_or_else(|| "未知歌手".into()),
-        "description": first_text(&singer, &["Desc", "desc", "Description"]).unwrap_or_default(),
-        "coverURL": cover,
-        "foreignName": first_text(&singer, &["ForeignName", "foreign_name", "OtherName"]),
-        "region": first_text(&info, &["IP", "Country", "country", "Area", "area"]),
-        "genre": first_text(&base, &["Genre", "genre"]).map(split_tags).unwrap_or_default(),
-        "songCount": first_int(&singer, &["SongCount", "songCount", "SongNum"])
-            .or_else(|| first_int(&base, &["SongCount", "songNum"])),
-        "albumCount": first_int(&singer, &["AlbumCount", "albumCount", "AlbumNum"]),
-        // The header keeps the counts at the top of `Info`, not inside `Singer`.
-        "fanCount": first_int(&info, &["FansNum", "Fans", "fans"])
-            .or_else(|| first_int(&singer, &["Fans", "fans"])),
-        "followCount": first_int(&info, &["FollowNum"]),
-    }))
+    // The upstream wraps matched words in `<em>` on some routes; a name is shown,
+    // not parsed, so the markup is stripped here rather than on screen.
+    let artist_name = strip_highlight(header_name.unwrap_or(matched_name));
+    let description = first_text(&singer, &["Desc", "desc", "Description"]).unwrap_or_default();
+    let foreign_name = first_text(&singer, &["ForeignName", "foreign_name", "OtherName"])
+        .or(Some(matched_foreign_name).filter(|value| !value.is_empty()));
+    let region = first_text(&info, &["IP", "Country", "country", "Area", "area"])
+        .or(Some(matched_region).filter(|value| !value.is_empty()));
+    let genres = first_text(&base, &["Genre", "genre"])
+        .map(split_tags)
+        .filter(|tags| !tags.is_empty())
+        .unwrap_or(matched_genres);
+
+    Ok(with_provenance(
+        json!({
+            // The key the app's enrichment decodes…
+            "artistName": artist_name,
+            "singerMid": mid,
+            "imageURL": cover,
+            "description": description,
+            "genreTags": genres,
+            "region": region,
+            "foreignName": foreign_name,
+            // …and the ones the online artist page was reading.
+            "name": artist_name,
+            "coverURL": cover,
+            "genre": genres,
+            "songCount": first_int(&singer, &["SongCount", "songCount", "SongNum"])
+                .or_else(|| first_int(&base, &["SongCount", "songNum"])),
+            "albumCount": first_int(&singer, &["AlbumCount", "albumCount", "AlbumNum"]),
+            // The header keeps the counts at the top of `Info`, not inside `Singer`.
+            "fanCount": first_int(&info, &["FansNum", "Fans", "fans"])
+                .or_else(|| first_int(&singer, &["Fans", "fans"])),
+            "followCount": first_int(&info, &["FollowNum"]),
+        }),
+        confidence,
+    ))
 }
 
 fn split_tags(value: String) -> Vec<String> {
@@ -410,9 +726,15 @@ pub fn toplist_categories(
                 .iter()
                 .filter_map(|item| {
                     let id = first_int(item, &["topId", "id", "toplistId"])?;
+                    let name = first_text(item, &["topTitle", "title", "name"]).unwrap_or_default();
                     Some(json!({
                         "id": id,
-                        "title": first_text(item, &["topTitle", "title", "name"]).unwrap_or_default(),
+                        // `name` is the key the app decodes, and it is not
+                        // optional there; `title` stays because the online pages
+                        // read it.
+                        "name": name,
+                        "title": name,
+                        "source": "qqmusic",
                         "coverURL": crate::methods::normalized_artwork_url(
                             first_text(item, &["picUrl", "cover", "coverURL"]).as_deref()
                         ),
@@ -423,7 +745,13 @@ pub fn toplist_categories(
             if toplists.is_empty() {
                 return None;
             }
-            Some(json!({ "title": title, "toplists": toplists }))
+            Some(json!({
+                "id": first_int(group, &["id", "groupId", "topId"]),
+                "name": title,
+                "title": title,
+                "source": "qqmusic",
+                "toplists": toplists,
+            }))
         })
         .collect())
 }
@@ -440,7 +768,7 @@ pub fn toplist_tracks(
     top_id: i64,
     offset: i64,
     limit: i64,
-) -> Result<Vec<Value>, UpstreamError> {
+) -> Result<(Vec<Value>, Option<i64>), UpstreamError> {
     let data = upstream.call_with(
         credential,
         crate::Class::Read,
@@ -451,7 +779,12 @@ pub fn toplist_tracks(
             param: json!({ "topId": top_id, "offset": offset, "num": limit }),
         },
     )?;
-    Ok(crate::methods::decoded_tracks(&data))
+    // `totalNum` is how many the ranking holds (300 for the big ones), so the
+    // caller knows whether another page exists instead of guessing from the
+    // page it just received.
+    let total = first_int(&data, &["totalNum", "total"])
+        .or_else(|| first_object(&data, &["data"]).and_then(|inner| first_int(inner, &["totalNum", "total"])));
+    Ok((crate::methods::decoded_tracks(&data), total))
 }
 
 /// The radio groups, each with its stations.
@@ -489,14 +822,20 @@ pub fn radio_stations(
                         "coverURL": crate::methods::normalized_artwork_url(
                             first_text(item, &["pic_url", "picUrl"]).as_deref()
                         ),
+                        "listenerCount": first_int(item, &["listener_count", "listenerCount"]),
+                        "source": "qqmusic",
                     }))
                 })
                 .collect();
             if stations.is_empty() {
                 return None;
             }
+            let title = first_text(group, &["title", "name"]).unwrap_or_default();
             Some(json!({
-                "title": first_text(group, &["title", "name"]).unwrap_or_default(),
+                "id": first_int(group, &["id", "groupId", "radioId"]),
+                "name": title,
+                "title": title,
+                "source": "qqmusic",
                 "stations": stations,
             }))
         })
@@ -540,6 +879,7 @@ pub fn new_songs(
     platform: Platform,
     region_type: i64,
 ) -> Result<Vec<Value>, UpstreamError> {
+    // The upstream's own `type`: 0 最新, 1 内地, 2 港台, 3 欧美, 4 日本, 5 韩国.
     let data = upstream.call_with(
         credential,
         crate::Class::Read,
@@ -646,6 +986,7 @@ pub fn stream_url(
         .unwrap_or(QUALITY_LADDER);
 
     let mut refusals: Vec<String> = Vec::new();
+    let mut tried: Vec<String> = Vec::new();
     for (label, prefix, extension) in ladder.iter().copied() {
         let filename = match media_mid.filter(|mid| !mid.trim().is_empty()) {
             Some(mid) => format!("{prefix}{mid}{extension}"),
@@ -676,20 +1017,60 @@ pub fn stream_url(
         let purl = first_text(&info, &["purl", "url"]).unwrap_or_default();
         if result == RESULT_OK && !purl.is_empty() {
             return Ok(json!({
+                "source": SOURCE,
                 "songMid": song_mid,
+                "mediaMid": media_mid.unwrap_or_default(),
                 "quality": label,
+                "extension": extension.trim_start_matches('.'),
                 "filename": filename,
-                "url": if purl.starts_with("http") { purl.clone() } else { format!("{STREAM_CDN}{purl}") },
+                "url": if purl.starts_with("http") { purl.clone() } else { format!("{STREAM_CDN}{}", purl.trim_start_matches('/')) },
+                "expiration": first_int(&data, &["expiration"]).unwrap_or(7200),
                 "playable": true,
+                "tried": tried,
             }));
         }
+        tried.push(format!("{label}:{result}"));
         refusals.push(format!("{label}:{}", describe_result(result)));
     }
+    // Not playable is an answer, not a failure: the app reads `restriction` for
+    // the reason and `tried` for the log, and treats a missing url as "no".
     Ok(json!({
+        "source": SOURCE,
         "songMid": song_mid,
+        "mediaMid": media_mid.unwrap_or_default(),
+        "url": "",
+        "quality": "",
         "playable": false,
+        "restriction": classify_restriction(&tried),
+        "tried": tried,
         "reason": format!("上游没有授予任何可用音质（{}）", refusals.join("、")),
     }))
+}
+
+/// Map the per-tier result codes onto the one word the app shows.
+fn classify_restriction(tried: &[String]) -> &'static str {
+    let codes: Vec<&str> = tried
+        .iter()
+        .filter_map(|entry| entry.split(':').nth(1))
+        .collect();
+    if codes.is_empty() {
+        return "unavailable";
+    }
+    if codes
+        .iter()
+        .all(|code| *code == RESULT_NO_PERMISSION.to_string())
+    {
+        "paid_required"
+    } else if codes
+        .iter()
+        .all(|code| *code == RESULT_DEVICE_RESTRICTED.to_string())
+    {
+        "device_restricted"
+    } else if codes.iter().all(|code| *code == RESULT_VKEY_FAILED.to_string()) {
+        "ticket_required"
+    } else {
+        "unavailable"
+    }
 }
 
 fn describe_result(code: i64) -> String {
@@ -917,6 +1298,17 @@ pub fn search(
     let items = first_array(&body, &[kind.body_key()])
         .cloned()
         .unwrap_or_default();
+    if items.is_empty() {
+        // Zero results and "the upstream refused to search" look identical in
+        // the mapped payload, so the raw answer is worth having in the log when
+        // someone asks why a title found nothing. stderr only: stdout is the
+        // protocol.
+        let raw = serde_json::to_string(&data).unwrap_or_default();
+        eprintln!(
+            "[qqmusic-helper-next] search returned nothing keyword={keyword} raw={}",
+            &raw[..raw.len().min(400)]
+        );
+    }
     let total = first_object(&data, &["meta"])
         .and_then(|meta| first_int(meta, &["sum", "total"]))
         .unwrap_or(items.len() as i64);
@@ -987,11 +1379,224 @@ fn map_playlist(item: &Value) -> Option<Value> {
         "title": strip_highlight(
             first_text(item, &["dissname", "dissName", "title", "name"]).unwrap_or_default()
         ),
+        // `logo` is where this route puts the cover (verified against a live
+        // reply: `imgurl`/`picurl`/`cover` are all absent here), and it arrives as
+        // `http://qpic.y.qq.com/...` — normalisation is what makes it load at all.
         "coverURL": crate::methods::normalized_artwork_url(
-            first_text(item, &["imgurl", "picurl", "cover"]).as_deref()
+            first_text(item, &["logo", "imgurl", "picurl", "cover"]).as_deref()
         ),
         "creator": first_text(item, &["creator", "nickname", "nick"]),
         "songCount": first_int(item, &["songnum", "songCount"]),
         "playCount": first_int(item, &["listennum", "playCount"]),
     }))
+}
+
+// MARK: - Artwork and biography matching (the local library's enrichment)
+
+/// The confidence the Python helper assigned by rank, kept identical so the
+/// app's own scoring sees the same numbers it always has.
+fn rank_confidence(index: usize) -> f64 {
+    (0.86 - index as f64 * 0.04).max(0.50)
+}
+
+/// Candidate covers for a local track: the catalogue is searched for the title,
+/// artist and album together, and each hit carries its cover.
+///
+/// The *app* decides which candidate wins (it compares titles, artists and
+/// durations itself); this only has to offer the right rows with a rank hint.
+pub fn search_track_artwork(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    title: &str,
+    artist: &str,
+    album: &str,
+    limit: i64,
+) -> Result<Vec<Value>, UpstreamError> {
+    let query = [title, artist, album]
+        .iter()
+        .filter(|part| !part.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let result = search(upstream, credential, platform, SearchKind::Songs, &query, 1, limit.clamp(1, 10))?;
+    let rows = result.get("tracks").and_then(Value::as_array).cloned().unwrap_or_default();
+    Ok(rows
+        .iter()
+        .enumerate()
+        .map(|(index, track)| {
+            json!({
+                "source": "qqmusic",
+                "title": track.get("title"),
+                "artist": track.get("artist"),
+                "album": track.get("album"),
+                "songMid": track.get("songMid"),
+                "albumMid": track.get("albumMid"),
+                "imageURL": track.get("imageURL"),
+                "duration": track.get("duration"),
+                "confidence": rank_confidence(index),
+            })
+        })
+        .collect())
+}
+
+/// Candidate covers for a local artist.
+pub fn search_artist_artwork(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    name: &str,
+    limit: i64,
+) -> Result<Vec<Value>, UpstreamError> {
+    if name.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let result = search(upstream, credential, platform, SearchKind::Artists, name, 1, limit.clamp(1, 10))?;
+    let rows = result.get("artists").and_then(Value::as_array).cloned().unwrap_or_default();
+    Ok(rows
+        .iter()
+        .enumerate()
+        .map(|(index, artist)| {
+            json!({
+                "source": "qqmusic",
+                "artistName": artist.get("name"),
+                "singerMid": artist.get("singerMid"),
+                "imageURL": artist.get("coverURL"),
+                "genreTags": [],
+                "region": artist.get("region"),
+                "confidence": rank_confidence(index),
+            })
+        })
+        .collect())
+}
+
+/// Candidate covers for a local album.
+pub fn search_album_artwork(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    album: &str,
+    artist: &str,
+    limit: i64,
+) -> Result<Vec<Value>, UpstreamError> {
+    let query = [album, artist]
+        .iter()
+        .filter(|part| !part.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let result = search(upstream, credential, platform, SearchKind::Albums, &query, 1, limit.clamp(1, 10))?;
+    let rows = result.get("albums").and_then(Value::as_array).cloned().unwrap_or_default();
+    Ok(rows
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            json!({
+                "source": "qqmusic",
+                "album": entry.get("title"),
+                "artist": entry.get("artist"),
+                "albumMid": entry.get("albumMid"),
+                "imageURL": entry.get("coverURL"),
+                "releaseDate": entry.get("releaseDate"),
+                "confidence": rank_confidence(index),
+            })
+        })
+        .collect())
+}
+
+/// An artist's biography, for the local library's enrichment.
+///
+/// Read through the homepage header, which is where the name and portrait live;
+/// the prose comes back empty until that endpoint's wiki payload is worked out
+/// (`docs/endpoints.md` §3), and an empty description here means "the catalogue
+/// has none", which the app already handles.
+pub fn artist_biography(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    name: &str,
+    singer_mid: Option<&str>,
+) -> Result<Value, UpstreamError> {
+    // `artist_detail` owns the name → mid resolution (a biography is asked for by
+    // name when the local library has nothing else), so this is the same read
+    // under a payload shaped for the artist page.
+    let detail = artist_detail(upstream, credential, platform, name, singer_mid)?;
+    let take = |key: &str| detail.get(key).cloned().unwrap_or(Value::Null);
+    Ok(json!({
+        "source": SOURCE,
+        "artistName": take("artistName"),
+        "singerMid": take("singerMid"),
+        "description": take("description"),
+        "imageURL": take("imageURL"),
+        "genreTags": take("genreTags"),
+        "region": take("region"),
+        "foreignName": take("foreignName"),
+        "metadataSource": SOURCE,
+        "metadataFetchedAt": utc_now_iso(),
+        "metadataConfidence": detail.get("confidence").cloned().unwrap_or(json!(0.9)),
+        "confidence": detail.get("confidence").cloned().unwrap_or(json!(0.9)),
+    }))
+}
+
+#[cfg(test)]
+mod artwork_tests {
+    use super::*;
+
+    #[test]
+    fn rank_confidence_starts_high_and_never_falls_past_half() {
+        assert!((rank_confidence(0) - 0.86).abs() < 1e-9);
+        assert!((rank_confidence(1) - 0.82).abs() < 1e-9);
+        assert!((rank_confidence(50) - 0.50).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_timestamp_is_the_shape_the_app_decodes() {
+        let stamp = utc_now_iso();
+        assert_eq!(stamp.len(), 20, "{stamp}");
+        assert!(stamp.ends_with('Z'), "{stamp}");
+        assert_eq!(&stamp[4..5], "-");
+        assert_eq!(&stamp[10..11], "T");
+        // Known instants, so the calendar arithmetic is pinned and not merely
+        // "something that looks like a date".
+        assert_eq!(civil_from_unix(0), (1970, 1, 1, 0, 0, 0));
+        assert_eq!(civil_from_unix(1_000_000_000), (2001, 9, 9, 1, 46, 40));
+        assert_eq!(civil_from_unix(1_782_000_000), (2026, 6, 21, 0, 0, 0));
+    }
+
+    #[test]
+    fn a_release_year_is_read_however_the_date_is_spelled() {
+        assert_eq!(release_year("2003-07-31"), Some(2003));
+        assert_eq!(release_year("2003"), Some(2003));
+        assert_eq!(release_year("发行于 2003 年"), Some(2003));
+        assert_eq!(release_year(""), None);
+        assert_eq!(release_year("未知"), None);
+    }
+
+    #[test]
+    fn restriction_says_what_the_account_lacks() {
+        assert_eq!(
+            classify_restriction(&["flac:104003".into(), "128:104003".into()]),
+            "paid_required"
+        );
+        assert_eq!(classify_restriction(&["flac:104013".into()]), "device_restricted");
+        assert_eq!(classify_restriction(&["flac:104004".into()]), "ticket_required");
+        assert_eq!(classify_restriction(&["flac:104003".into(), "128:0".into()]), "unavailable");
+        assert_eq!(classify_restriction(&[]), "unavailable");
+    }
+
+    #[test]
+    fn enrichment_payloads_carry_what_the_app_reads() {
+        let payload = with_provenance(json!({ "title": "晴天" }), 0.82);
+        assert_eq!(payload["source"], "qqmusic");
+        assert_eq!(payload["metadataSource"], "qqmusic");
+        assert_eq!(payload["confidence"], 0.82);
+        assert_eq!(payload["metadataConfidence"], 0.82);
+        assert!(payload["metadataFetchedAt"].as_str().unwrap().ends_with('Z'));
+    }
 }

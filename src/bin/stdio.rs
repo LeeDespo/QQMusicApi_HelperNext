@@ -89,6 +89,11 @@ fn main() {
     for worker in workers {
         let _ = worker.join();
     }
+
+    // stdin closed: the host is gone, so the download engine it started goes with
+    // it. Leaving a daemon behind would be a surprise the second time the app is
+    // launched — the port would be held by a process nobody owns.
+    upstream.aria2.shutdown();
 }
 
 fn serve(upstream: &Upstream, request: &Value) -> Value {
@@ -108,6 +113,52 @@ fn serve(upstream: &Upstream, request: &Value) -> Value {
             },
             Err(error) => with_id(id, json!({ "ok": false, "error": error.to_string() })),
         };
+    }
+    if method == "set_rate_limit" {
+        // Configuration, not an upstream read: the limiter lives on the shared
+        // `Upstream`, and this has to work while logged out.
+        return with_id(id, methods::configure_rate_limit(upstream, &params));
+    }
+    if method == "set_breaker" {
+        return with_id(id, methods::configure_breaker(upstream, &params));
+    }
+    if method == "aria2_status" {
+        return with_id(id, match methods::aria2_status(upstream, &params) {
+            Ok(value) => value,
+            Err(error) => json!({ "ok": false, "error": error.to_string() }),
+        });
+    }
+    if method == "aria2_restart" {
+        return with_id(id, match methods::aria2_restart(upstream) {
+            Ok(value) => value,
+            Err(error) => json!({ "ok": false, "error": error.to_string() }),
+        });
+    }
+    if method == "aria2_configure" {
+        return with_id(id, methods::aria2_configure(upstream, &params));
+    }
+    if method == "aria2_list" {
+        return with_id(id, match methods::aria2_list(upstream) {
+            Ok(value) => value,
+            Err(error) => json!({ "ok": false, "error": error.to_string() }),
+        });
+    }
+    if method == "aria2_pause" || method == "aria2_unpause" || method == "aria2_cancel" {
+        return with_id(id, match methods::aria2_control(upstream, method, &params) {
+            Ok(value) => value,
+            Err(error) => json!({ "ok": false, "error": error.to_string() }),
+        });
+    }
+    if method == "aria2_add" || method == "aria2_tell" {
+        let result = if method == "aria2_add" {
+            methods::aria2_add(upstream, &params)
+        } else {
+            methods::aria2_tell(upstream, &params)
+        };
+        return with_id(id, match result {
+            Ok(value) => value,
+            Err(error) => json!({ "ok": false, "error": error.to_string() }),
+        });
     }
     if method == "logout" {
         let _ =

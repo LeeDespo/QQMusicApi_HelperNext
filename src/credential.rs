@@ -94,8 +94,14 @@ impl Credential {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
+            // Two spellings, both real: the login response carries `encryptUin`
+            // (the library's field alias — it reads the camelCase and writes the
+            // snake_case), while the credential file it wrote has `encrypt_uin`.
+            // Reading only the latter is how a perfectly good login ended up
+            // without the value the 关注歌手 endpoint addresses the account by.
             encrypted_uin: value
                 .get("encrypt_uin")
+                .or_else(|| value.get("encryptUin"))
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),

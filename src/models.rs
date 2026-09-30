@@ -13,6 +13,98 @@ use serde::{Deserialize, Serialize};
 // The derive list stays because the same structs are the CLI adapter's models.
 use boltffi::data;
 
+/// What the component is enforcing after a `set_rate_limit`.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RateLimitConfigModel {
+    pub enabled: bool,
+    pub window_seconds: i64,
+    pub max_requests: i64,
+}
+
+/// What the component is enforcing after a `set_breaker`.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BreakerConfigModel {
+    pub enabled: bool,
+    pub failure_threshold: i64,
+    pub failure_window_seconds: i64,
+    pub open_seconds: i64,
+}
+
+/// What the download engine is doing.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Aria2Status {
+    pub installed: bool,
+    pub running: bool,
+    pub binary: String,
+    pub port: i64,
+    pub version: Option<String>,
+    pub active: i64,
+    pub downloads: i64,
+    pub waiting: i64,
+    pub stopped: i64,
+    pub download_speed: i64,
+    pub options: Aria2OptionsModel,
+}
+
+/// The download engine's tunables, as the settings page shows them.
+#[data]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Aria2OptionsModel {
+    pub split: i64,
+    pub max_connection_per_server: i64,
+    pub max_concurrent_downloads: i64,
+    pub min_split_size_mib: i64,
+    pub max_overall_download_limit_kib: i64,
+}
+
+/// One queued file: the gid from `aria2_add`, or its live state from `aria2_tell`.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Aria2Download {
+    pub gid: String,
+    pub status: String,
+    pub completed: i64,
+    pub total: i64,
+    pub speed: i64,
+    pub path: String,
+    pub error: String,
+    pub error_code: i64,
+}
+
+/// The engine's task list, as the toolbar's download list shows it.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Aria2TaskList {
+    pub downloads: Vec<Aria2Task>,
+    pub removed: Vec<String>,
+}
+
+/// One task.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Aria2Task {
+    pub gid: String,
+    /// `active` / `waiting` / `paused` / `complete` / `error` / `removed`, in
+    /// aria2's own vocabulary.
+    pub status: String,
+    pub completed: i64,
+    pub total: i64,
+    pub speed: i64,
+    pub name: String,
+    pub path: String,
+    pub error: String,
+}
+
 /// One credited singer of a track.
 #[data]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -363,4 +455,42 @@ pub struct AlbumSearch {
 pub struct PlaylistSearch {
     pub total: i64,
     pub playlists: Vec<Playlist>,
+}
+
+/// One candidate the catalogue offers for a local item's cover.
+///
+/// The same shape serves a track, an artist and an album — the fields that do
+/// not apply to a kind are simply absent, which is also how the app reads them.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtworkCandidate {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub artist_name: Option<String>,
+    pub singer_mid: Option<String>,
+    pub song_mid: Option<String>,
+    pub album_mid: Option<String>,
+    #[serde(rename = "imageURL")]
+    pub image_url: Option<String>,
+    pub duration: Option<i64>,
+    pub release_date: Option<String>,
+    /// A rank hint, not a verdict: the host scores the candidates itself.
+    pub confidence: Option<f64>,
+}
+
+/// An artist's biography, as the local library's enrichment reads it.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistBiography {
+    pub artist_name: Option<String>,
+    pub singer_mid: Option<String>,
+    pub description: Option<String>,
+    #[serde(rename = "imageURL")]
+    pub image_url: Option<String>,
+    pub region: Option<String>,
+    pub foreign_name: Option<String>,
+    pub confidence: Option<f64>,
 }

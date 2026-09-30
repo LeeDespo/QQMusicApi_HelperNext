@@ -14,6 +14,7 @@ use crate::credential::Credential;
 use crate::device::DeviceStore;
 use crate::guard::{Class, CircuitBreaker, RateLimit};
 use serde_json::{json, Value};
+use std::sync::Mutex;
 use std::time::Duration;
 
 const MUSICU_ENDPOINT: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
@@ -88,6 +89,11 @@ pub struct Upstream {
     /// Generated once and kept beside the credential. Consulted only for the
     /// android profile, whose interfaces are the ones that want a device.
     device: DeviceStore,
+    /// The download engine, managed here because it lives beside this component
+    /// and only the component knows which downloads are in flight.
+    pub aria2: crate::aria2::Aria2,
+    /// See [`Upstream::encrypted_uin`].
+    encrypt_uin_cache: Mutex<Option<String>>,
 }
 
 #[derive(Debug)]
@@ -126,7 +132,43 @@ impl Upstream {
             limiter: RateLimit::new(Duration::from_secs(10)),
             breaker: CircuitBreaker::default(),
             device,
+            aria2: crate::aria2::Aria2::new(crate::data_directory()),
+            encrypt_uin_cache: Mutex::new(None),
         }
+    }
+
+    /// The account's encrypted uin, which 关注歌手 addresses the account by.
+    ///
+    /// `get_login_status` reads it from the credential; a credential written before
+    /// the component understood the login response's `encryptUin` spelling has
+    /// none, and `GetLoginUserInfo` is where the account itself reports it. Cached
+    /// for the life of the process: it cannot change while a session lasts.
+    pub fn encrypted_uin(&self, credential: &Credential) -> Result<String, UpstreamError> {
+        if !credential.encrypted_uin.is_empty() {
+            return Ok(credential.encrypted_uin.clone());
+        }
+        if let Some(cached) = self.encrypt_uin_cache.lock().expect("encrypt uin").clone() {
+            return Ok(cached);
+        }
+        let data = self.call_with(
+            credential,
+            Class::Account,
+            Platform::Android,
+            Call {
+                module: "music.UserInfo.userInfoServer",
+                method: "GetLoginUserInfo",
+                param: json!({}),
+            },
+        )?;
+        // Verified live that this endpoint carries no encrypted uin (2026-10-01);
+        // the caller falls back to the numeric id, which the same endpoint accepts.
+        let found = first_text(&data, &["encryptUin", "encrypt_uin"])
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                UpstreamError::Upstream("上游没有返回 encrypt_uin（可用数字 uin 代替）".into())
+            })?;
+        *self.encrypt_uin_cache.lock().expect("encrypt uin") = Some(found.clone());
+        Ok(found)
     }
 
     /// An agent for the login handshake: no redirect following, because two of
@@ -201,6 +243,13 @@ impl Upstream {
             .get("req_0")
             .ok_or_else(|| UpstreamError::Upstream("响应里没有 req_0".into()))?;
         let code = slot.get("code").and_then(Value::as_i64).unwrap_or(0);
+        // The refusal codes are errors *even when data came along*: risk control
+        // answers 2001 with an empty result set, and reading that as "no matches"
+        // is how a throttled search turns into an empty page that looks like the
+        // catalogue has nothing. (The reference library raises on the same four.)
+        if let Some(reason) = refusal_reason(code) {
+            return Err(UpstreamError::Upstream(format!("上游返回错误（{code}）：{reason}")));
+        }
         match slot.get("data") {
             Some(Value::Object(data)) if !data.is_empty() => Ok(Value::Object(data.clone())),
             _ => Err(UpstreamError::Upstream(format!(
@@ -213,7 +262,14 @@ impl Upstream {
     /// The account's own asset list (`reqtype` 2 = albums, 3 = playlists).
     ///
     /// The legacy endpoint wants the *numeric* uin as a query parameter, and the
-    /// cookies for the authorisation.
+    /// cookies for the authorisation. `format=json` is not optional: without it
+    /// the route answers something this parser cannot read, which looks exactly
+    /// like an account with no collections.
+    ///
+    /// An empty `data` is reported as a refusal rather than as "you have none".
+    /// The app caches whatever list this returns — a session that has gone stale
+    /// answers with an empty envelope, and passing that on would wipe the
+    /// favourites the user was looking at.
     pub fn profile_assets(
         &self,
         credential: &Credential,
@@ -224,14 +280,22 @@ impl Upstream {
             return Err(UpstreamError::Upstream("需要登录后才能读取".into()));
         }
         let url = format!(
-            "{PROFILE_ASSETS_ENDPOINT}?ct=20&cid=205360956&userid={}&reqtype={reqtype}&sin=0&ein={limit}",
+            "{PROFILE_ASSETS_ENDPOINT}?ct=20&cid=205360956&userid={}&reqtype={reqtype}\
+&sin=0&ein={limit}&format=json",
             credential.music_id
         );
         let response = self.get_json(credential, Class::Account, &url)?;
-        response
-            .get("data")
-            .cloned()
-            .ok_or_else(|| UpstreamError::Upstream("响应里没有 data".into()))
+        let code = first_int(&response, &["code", "retcode"]).unwrap_or(0);
+        if code != 0 {
+            let message = first_text(&response, &["msg", "message", "subcode"]).unwrap_or_default();
+            return Err(UpstreamError::Upstream(format!("上游返回错误（{code}）：{message}")));
+        }
+        match response.get("data") {
+            Some(Value::Object(data)) if !data.is_empty() => Ok(Value::Object(data.clone())),
+            _ => Err(UpstreamError::Upstream(format!(
+                "上游没有返回数据（code={code}）：登录可能已过期"
+            ))),
+        }
     }
 
     /// GET a legacy `c.y.qq.com` fcgi route and return the parsed object.
@@ -451,6 +515,18 @@ impl Upstream {
                 Err(UpstreamError::Transport(error.to_string()))
             }
         }
+    }
+}
+
+/// The refusal codes the reference library treats as errors, with the same
+/// meanings — 2001 is the one that matters in practice, because the upstream
+/// answers it with a *successful-looking* empty result set.
+fn refusal_reason(code: i64) -> Option<&'static str> {
+    match code {
+        2000 => Some("需要签名"),
+        2001 => Some("触发风控：请稍后再试（应用会退避）"),
+        1000 | 104401 | 104400 => Some("登录已过期，请重新登录"),
+        _ => None,
     }
 }
 

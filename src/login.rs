@@ -146,7 +146,7 @@ pub fn poll_login(
         .header("User-Agent", BROWSER_UA)
         .header("Cookie", format!("qrsig={identifier}"))
         .call()
-        .map_err(|error| UpstreamError::Transport(error.to_string()))?;
+        .map_err(poll_refused)?;
     let text = response
         .body_mut()
         .read_to_string()
@@ -214,8 +214,8 @@ fn exchange_for_credential(
         ("src", "1"),
         ("update_auth", "1"),
         ("openapi", "1010_1030"),
-        ("auth_time", &millis_string()),
-        ("ui", &rand_nonce()),
+        ("auth_time", &auth_time_string()),
+        ("ui", &rand_uuid()),
     ];
     let g_tk = hash33(&p_skey).to_string();
     let mut body_parts: Vec<String> = form
@@ -254,6 +254,22 @@ fn exchange_for_credential(
     store
         .store(&credential)
         .map_err(|error| UpstreamError::Transport(error.to_string()))
+}
+
+/// Say what a refused status query means.
+///
+/// 403 here has exactly one cause in practice — the token or the cookie was not
+/// accepted — and it is indistinguishable from a permission problem unless the
+/// message says so. (Getting this wrong once cost a round of hunting through
+/// referers, user agents and cookie jars; the fault was the `hash33` seed.)
+fn poll_refused(error: ureq::Error) -> UpstreamError {
+    match error {
+        ureq::Error::StatusCode(code) => UpstreamError::Upstream(format!(
+            "扫码状态查询被拒绝（HTTP {code}）：qrsig/ptqrtoken 未被接受 —— \
+二维码可能已过期，重新生成即可；若每次都这样，是 token 算法问题"
+        )),
+        other => UpstreamError::Transport(other.to_string()),
+    }
 }
 
 /// Read a `ptuiCB('0','0','url','0','msg','nick')` reply.
@@ -305,10 +321,29 @@ fn rand_nonce() -> String {
     format!("0.{:016}", rng.gen::<u64>())
 }
 
-fn millis_string() -> String {
+/// A `uuid4`-shaped `ui`, which is what the library sends to `authorize`.
+fn rand_uuid() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// `str(int(time()) * 1000)` — milliseconds, which is what the reference sends.
+fn auth_time_string() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| (duration.as_millis() * 1000).to_string())
+        .map(|duration| duration.as_millis().to_string())
         .unwrap_or_else(|_| "0".into())
 }
 
