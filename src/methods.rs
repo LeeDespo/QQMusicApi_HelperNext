@@ -576,6 +576,12 @@ fn civil_date_from_unix(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
+/// An artist's cover follows the same pattern album covers do, with the singer
+/// photo prefix (`T001`).
+pub fn singer_cover_url(mid: &str) -> String {
+    format!("https://y.gtimg.cn/music/photo_new/T001R300x300M000{mid}.jpg")
+}
+
 pub fn album_cover_url(mid: &str) -> String {
     format!("https://y.gtimg.cn/music/photo_new/T002R800x800M000{mid}.jpg")
 }

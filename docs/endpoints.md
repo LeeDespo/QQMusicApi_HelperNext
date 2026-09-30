@@ -81,19 +81,20 @@ web 与 android 档案都一样。Python 版能取到（应用主页的精选卡
 **获取并携带 qimei 设备参数**（见 `utils/device.py`：它向上游要 qimei/qimei36 并缓存）。
 所以这一条与**搜索**是同一个工作项：**实现设备标识**。
 
-### 3. 歌手资料：换接口
+### 3. 歌手资料：接口换对了，但上游回空壳 —— 与搜索/推荐同因
 
 ```
 music.musichallSinger.SingerInfoInter / GetSingerDetail
   {"singer_mids":[mid], …} → code 10006
   {"singerMid": mid}       → code 104400，singer_list 为空
-```
-库里的 `get_info()`（歌手主页头部，名字/封面/统计）走的是**另一个接口**：
 
+music.UnifiedHomepage.UnifiedHomepageSrv / GetHomepageHeader  {"SingerMid": mid}
+  → code 10000，Info.Singer 每个字段都是空串（Name/SingerMid 都空），
+    只有 Info.FansNum / FollowNum / IP 有值
 ```
-music.UnifiedHomepage.UnifiedHomepageSrv / GetHomepageHeader   {"SingerMid": mid}
-```
-**修法**：资料用这个接口；简介（wiki）另行确认，`GetSingerDetail` 需要补齐它真正要求的参数。
+库里的 `get_info()` 走的就是后者，参数与我发的一样，所以**不是参数问题**：
+它与搜索、猜你喜欢是同一类——**缺设备标识**（见 `docs/parsing.md` 第 11 条）。
+本组件现在把这种"空壳"直接报成错误，而不是渲染成「未知歌手」。
 
 ## 状态
 

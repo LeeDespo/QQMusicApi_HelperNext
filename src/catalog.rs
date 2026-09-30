@@ -304,7 +304,19 @@ pub fn artist_albums(
     Ok(albums)
 }
 
-/// An artist's profile and biography.
+/// An artist's profile.
+///
+/// Read from the *homepage header* — `music.UnifiedHomepage.UnifiedHomepageSrv`
+/// with `{"SingerMid": mid}` — because `GetSingerDetail` refuses both parameter
+/// spellings it is documented with (10006, then 104400 with an empty list).
+/// The header answers `data.Info.Singer` plus `data.Info.BaseInfo`, and it
+/// reports a non-zero `code` while carrying usable data, so a code of its own is
+/// not treated as failure here.
+///
+/// The biography is **not** in this response. `GetSingerDetail`'s wiki payload is
+/// where the Python library reads it from, and that request still needs its
+/// required parameters worked out (see `docs/endpoints.md`), so `description`
+/// comes back empty until then rather than pretending to have been read.
 pub fn artist_detail(
     upstream: &Upstream,
     credential: &Credential,
@@ -316,40 +328,45 @@ pub fn artist_detail(
         crate::Class::Read,
         platform,
         Call {
-            module: "music.musichallSinger.SingerInfoInter",
-            method: "GetSingerDetail",
-            param: json!({
-                "singer_mids": [singer_mid],
-                "ex_singer": true,
-                "wiki_singer": true,
-                "group_singer": true,
-                "pic": true,
-                "photos": true,
-            }),
+            module: "music.UnifiedHomepage.UnifiedHomepageSrv",
+            method: "GetHomepageHeader",
+            param: json!({ "SingerMid": singer_mid }),
         },
     )?;
-    let singer = first_array(&data, &["singer_list", "singerList", "list"])
-        .and_then(|list| list.first())
-        .cloned()
-        .unwrap_or(data.clone());
-    let basic = first_object(&singer, &["basic_info", "basicInfo", "info"]).cloned().unwrap_or(singer.clone());
-    // The biography arrives under `wiki` (a wiki XML blob) or `desc`.
-    let biography = first_text(&singer, &["desc", "description"])
-        .or_else(|| first_object(&singer, &["wiki"]).and_then(|wiki| first_text(wiki, &["desc", "content", "introduction"])))
-        .unwrap_or_default();
+    let info = first_object(&data, &["Info", "info"]).cloned().unwrap_or(json!({}));
+    let singer = first_object(&info, &["Singer", "singer"]).cloned().unwrap_or(json!({}));
+    let base = first_object(&info, &["BaseInfo", "baseInfo"]).cloned().unwrap_or(json!({}));
+    // The header can answer `10000` with a *shaped but empty* singer (every
+    // field blank, only the stats filled in). Returning that as a profile would
+    // put 未知歌手 on screen for an artist that exists, so it is reported as the
+    // missing-device-identity case it looks like (see `docs/parsing.md`).
+    let name = first_text(&singer, &["Name", "name"]);
+    if name.is_none() && first_text(&singer, &["SingerMid", "mid"]).is_none() {
+        return Err(UpstreamError::Upstream(
+            "上游返回了空的歌手资料（与搜索、推荐同因：可能缺设备标识）".into(),
+        ));
+    }
+    let cover = {
+        let explicit = first_text(&singer, &["SingerPic", "Pic", "pic"]);
+        let built = first_text(&singer, &["SingerMid", "Mid", "mid"])
+            .map(|mid| crate::methods::singer_cover_url(&mid));
+        crate::methods::normalized_artwork_url(explicit.or(built).as_deref())
+    };
     Ok(json!({
         "singerMid": singer_mid,
-        "name": first_text(&basic, &["name", "singer_name", "singerName"]).unwrap_or_else(|| "未知歌手".into()),
-        "description": biography,
-        "coverURL": crate::methods::normalized_artwork_url(
-            first_text(&basic, &["pic", "photo", "picURL"]).as_deref()
-        ),
-        "foreignName": first_text(&basic, &["foreign_name", "foreignName", "other_name"]),
-        "region": first_text(&basic, &["country", "area", "region"]),
-        "genre": first_text(&basic, &["genre", "tag"]).map(split_tags).unwrap_or_default(),
-        "songCount": first_int(&basic, &["song_count", "songNum"]),
-        "albumCount": first_int(&basic, &["album_count", "albumNum"]),
-        "fanCount": first_int(&basic, &["fans", "fanNum", "fansNum"]),
+        "name": name.unwrap_or_else(|| "未知歌手".into()),
+        "description": first_text(&singer, &["Desc", "desc", "Description"]).unwrap_or_default(),
+        "coverURL": cover,
+        "foreignName": first_text(&singer, &["ForeignName", "foreign_name", "OtherName"]),
+        "region": first_text(&info, &["IP", "Country", "country", "Area", "area"]),
+        "genre": first_text(&base, &["Genre", "genre"]).map(split_tags).unwrap_or_default(),
+        "songCount": first_int(&singer, &["SongCount", "songCount", "SongNum"])
+            .or_else(|| first_int(&base, &["SongCount", "songNum"])),
+        "albumCount": first_int(&singer, &["AlbumCount", "albumCount", "AlbumNum"]),
+        // The header keeps the counts at the top of `Info`, not inside `Singer`.
+        "fanCount": first_int(&info, &["FansNum", "Fans", "fans"])
+            .or_else(|| first_int(&singer, &["Fans", "fans"])),
+        "followCount": first_int(&info, &["FollowNum"]),
     }))
 }
 
