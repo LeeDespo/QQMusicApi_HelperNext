@@ -46,8 +46,117 @@
 | 收藏 / 取消收藏（唯一的写） | `set_liked` | `music.musicasset.PlaylistBaseWrite` / `AddSonglist`·`DelSonglist` | `dirid=201`, `songIds/v_songIds` | ⏳ |
 | 扫码登录 | `start_login` / `poll_login` | `music.login.LoginServer` / `CreateQRCode` + `Login` | `tmeAppID=qqmusic`；轮询用 `musicid, qrCodeID, token` | ⏳ 另有 QQ Connect 与微信两条路径 |
 
-> ⏳ 的条目形状已经确定（见上表），实现方式是同一套：`methods.rs` 里加一个分支 + `api.rs` 里加一个
-> `#[export]` 包装 + 一条真账号的验证。`docs/parsing.md` 记着每类响应里那些不直观的地方。
+> ⏳ 的条目形状已经确定（见上表与下面的"精确形状"），实现方式是同一套：`methods.rs` 里加一个分支 +
+> `api.rs` 里加一个 `#[export]` 包装 + 一条真账号的验证。`docs/parsing.md` 记着每类响应里那些不直观的地方。
+
+## 精确形状（已从 QQMusicApi 源码逐条核对，可直接照写）
+
+### 歌曲 / 专辑资料
+
+```
+fetch_song_detail   music.pf_song_detail_svr / get_song_detail_yqq   {"song_mid": mid}
+                    → info.intro.content[].value（多段用换行连接）；另有 info.company/genre/lan/pub_time
+fetch_album_detail  music.musichallAlbum.AlbumInfoServer / GetAlbumDetail
+                    {"albumId": <数字>} 或 {"albumMId": <mid>}（二选一，按传入的是数字还是 mid）
+fetch_album_tracks  music.musichallAlbum.AlbumSongList / GetAlbumSongList
+                    {"albumId": <数字>} 或 {"albumMid": <mid>} + {"begin": offset, "num": limit, "order": 0}
+```
+
+### 歌手
+
+```
+fetch_artist_songs   musichall.song_list_server / GetSingerSongList
+                     {"singerMid": mid, "order": 1, "number": num, "begin": (page-1)*num}
+                     "最新" 上游不支持排序 → 本地按每首的 album.time_public 倒序
+fetch_artist_albums  music.musichallAlbum.AlbumListServer / GetAlbumList
+                     同上参数；"最新" 同理按 album time_public 倒序
+fetch_artist_detail  music.musichallSinger.SingerInfoInter / GetSingerDetail
+                     {"singer_mids": [mid], "ex_singer": true, "wiki_singer": true,
+                      "group_singer": true, "pic": true, "photos": true}
+                     简介取 wiki/desc 字段；头像取 pic 相关字段
+```
+
+### 排行榜
+
+```
+fetch_toplist_categories  music.musicToplist.Toplist / GetAll       {}
+                          → data 里的分组（每组含 topList）与榜单条目（topId/topTitle/cover）
+fetch_toplist_tracks      music.musicToplist.Toplist / GetDetail
+                          {"topId": id, "offset": n, "num": m}[, {"withTags": true}]
+                          曲目在 songInfoList（不是 data.data.song），总数在 totalNum
+```
+
+### 电台 / 新歌 / 猜你喜欢
+
+```
+fetch_radio_stations  pf.radiosvr / GetRadiolist        {"uin": <数字uin 或 "0">}
+                      → radio_list[].list[]（分组）{id, title, pic_url}
+fetch_radio_tracks    pf.radiosvr / GetRadiosonglist
+                      {"id": stationId, "firstplay": 1|0, "num": limit}
+                      → 曲目在 data.track_list / songlist
+fetch_new_songs       newsong.NewSongServer / get_new_song_info   {"type": <地区码>}
+fetch_guess_recommend music.radioProxy.MbTrackRadioSvr / get_radio_track
+                      {"id": 99, "num": 5, "from": 0, "scene": 0, "song_ids": []}（需凭据）
+```
+
+### 歌词 / 取流
+
+```
+fetch_lyric      music.musichallSong.PlayLyricInfo / GetPlayLyricInfo
+                 {"songMID": mid, "songID": id?, "format": "json", "crypt": 0,
+                  "qrc": 1, "trans": 1, "roma": 1}
+                 lyric/trans/roma/qrc 都是 base64；逐字时间在 qrc 里
+resolve_song_url music.vkey.GetVkey / UrlGetVkey（加密档位时是 music.vkey.GetEVkey / CgiGetEVkey）
+                 {"uin": <数字uin>, "filename": [...], "guid": <随机>, "songmid": [...],
+                  "songtype": [...], "ctx": 0}
+                 文件名构造：有 media_mid 用 `<档位前缀><media_mid><后缀>`（M500.mp3 / M800.mp3 /
+                 F000.flac / C400.m4a），没有 media_mid 时用 `<前缀><mid><mid><后缀>`
+                 逐档探测并读 midurlinfo[].result（0 成功 / 104003 无权限 / 104004 取票失败 /
+                 104013 设备受限），返回第一个可用的 purl + vkey
+```
+
+### 搜索（四类共用）
+
+```
+search_songs / search_artists / search_albums / search_playlists
+music.search.SearchCgiService / DoSearchForQQMusicMobile
+{"searchid": <随机>, "query": keyword, "search_type": 0|1|2|3,
+ "num_per_page": num, "page_num": page, "highlight": false, "grp": true,
+ "selectors": {}, "vec_selectors": []}
+→ 结果在 body.item_song / body.singer / body.item_album / body.item_songlist；总数 meta.sum
+
+⚠ 这一条 QQMusicApi 明确用 **Platform.ANDROID**（ct 11 / cv 14090008，带 qimei 等设备参数），
+而本组件目前全局用 web 档案。实现搜索前要先给 `upstream.rs` 加"按调用选平台档案"的能力，
+并用真账号确认 web 档案是否也能过——**这是剩余工作里唯一的技术未知项**。
+```
+
+### 收藏 / 取消收藏（唯一的写）
+
+```
+set_liked  music.musicasset.PlaylistDetailWrite / AddSonglist（收藏）· DelSonglist（取消）
+           {"dirId": 201, "tid": 0, "bFmtUtf8": true,
+            "v_songInfo": [{"songId": <数字>, "songType": 0}]}
+           需要 songId（数字）；只给 songMid 时要先用 song.query_song 换 songId
+```
+
+### 扫码登录（多步）
+
+```
+start_login  music.login.LoginServer / CreateQRCode    {"tmeAppID": "qqmusic", <版本参数>}
+             → qrCodeID/token/二维码内容（另有 QQ Connect 与微信两条路径，各自走不同授权域名）
+poll_login   music.login.LoginServer / Login
+             {"musicid": <数字>, "qrCodeID": ..., "token": ...}
+             轮询事件：SCAN / CONF / DONE / TIMEOUT / REFUSE；DONE 时响应里带回凭据
+             → 等价于 import_credential(uin, qm_keyst)
+```
+
+### 后续实现顺序（建议）
+
+1. 资料类（歌曲/专辑简介、专辑曲目、歌手三项）—— web 档案，风险最低
+2. 列表类（榜单、电台、新歌、猜你喜欢）—— web 档案
+3. 歌词 + 取流 —— 需要 media_mid 与音质阶梯
+4. 搜索四类 —— **先解决平台档案**（见上）
+5. 收藏写（需要 songId 换算）+ 扫码登录（多步状态机）
 
 ## 响应字段的解析入口
 
