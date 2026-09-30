@@ -56,6 +56,11 @@ pub const METHODS: &[&str] = &[
     "resolve_song_url",
     // The one write.
     "set_liked",
+    // Search, one kind per method.
+    "search_songs",
+    "search_artists",
+    "search_albums",
+    "search_playlists",
     // Logging in without a host that can produce cookies.
     "start_login",
     "poll_login",
@@ -175,6 +180,23 @@ fn catalog_dispatch(
             params.get("translation").and_then(Value::as_bool).unwrap_or(true),
         )
         .map(|lyric| json!({ "lyric": lyric })),
+        "search_songs" | "search_artists" | "search_albums" | "search_playlists" => {
+            let kind = match method {
+                "search_songs" => crate::catalog::SearchKind::Songs,
+                "search_artists" => crate::catalog::SearchKind::Artists,
+                "search_albums" => crate::catalog::SearchKind::Albums,
+                _ => crate::catalog::SearchKind::Playlists,
+            };
+            crate::catalog::search(
+                upstream,
+                credential,
+                platform,
+                kind,
+                &text("keyword"),
+                int("page").unwrap_or(1),
+                round(int("limit"), 20, 1, 50),
+            )
+        }
         "start_login" => crate::login::start_login(upstream).map(|qr| {
             json!({
                 "qrcode": {

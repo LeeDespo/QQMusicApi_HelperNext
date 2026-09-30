@@ -331,3 +331,36 @@ pub struct LoginPoll {
     /// Present once `logged_in`: who just logged in.
     pub login: Option<LoginStatus>,
 }
+
+/// A search page: the rows plus the catalogue's own total for the query.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackSearch {
+    pub total: i64,
+    pub tracks: Vec<Track>,
+}
+
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistSearch {
+    pub total: i64,
+    pub artists: Vec<Artist>,
+}
+
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumSearch {
+    pub total: i64,
+    pub albums: Vec<Album>,
+}
+
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistSearch {
+    pub total: i64,
+    pub playlists: Vec<Playlist>,
+}

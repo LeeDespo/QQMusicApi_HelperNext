@@ -177,6 +177,10 @@ mod tests {
             ("fetch_recommend_feed", "recommend_feed"),
             ("fetch_lyric", "lyric"),
             ("resolve_song_url", "resolve_song_url"),
+            ("search_songs", "search_songs"),
+            ("search_artists", "search_artists"),
+            ("search_albums", "search_albums"),
+            ("search_playlists", "search_playlists"),
             ("start_login", "start_login"),
             ("poll_login", "poll_login"),
         ];
@@ -398,4 +402,26 @@ pub fn start_login() -> Result<crate::models::LoginQrCode, HelperError> {
 #[export]
 pub fn poll_login(identifier: String) -> Result<crate::models::LoginPoll, HelperError> {
     call("poll_login", json!({ "identifier": identifier }))
+}
+
+// MARK: - Search
+
+#[export]
+pub fn search_songs(keyword: String, page: i64, limit: i64) -> Result<crate::models::TrackSearch, HelperError> {
+    call("search_songs", json!({ "keyword": keyword, "page": page, "limit": limit }))
+}
+
+#[export]
+pub fn search_artists(keyword: String, page: i64, limit: i64) -> Result<crate::models::ArtistSearch, HelperError> {
+    call("search_artists", json!({ "keyword": keyword, "page": page, "limit": limit }))
+}
+
+#[export]
+pub fn search_albums(keyword: String, page: i64, limit: i64) -> Result<crate::models::AlbumSearch, HelperError> {
+    call("search_albums", json!({ "keyword": keyword, "page": page, "limit": limit }))
+}
+
+#[export]
+pub fn search_playlists(keyword: String, page: i64, limit: i64) -> Result<crate::models::PlaylistSearch, HelperError> {
+    call("search_playlists", json!({ "keyword": keyword, "page": page, "limit": limit }))
 }

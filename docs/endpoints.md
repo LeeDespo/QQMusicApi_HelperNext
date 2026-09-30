@@ -104,16 +104,25 @@ music.UnifiedHomepage.UnifiedHomepageSrv / GetHomepageHeader  {"SingerMid": mid}
 它与搜索、猜你喜欢是同一类——**缺设备标识**（见 `docs/parsing.md` 第 11 条）。
 本组件现在把这种"空壳"直接报成错误，而不是渲染成「未知歌手」。
 
-### 4. 收藏（写）：`code 1000` —— 有了 QIMEI 之后仍然如此
+### 4. 收藏（写）：`code 1000` —— 原因大概率是**凭据陈旧**，不是缺参数
 
 ```
 music.musicasset.PlaylistDetailWrite / AddSonglist
   {"dirId":201,"tid":0,"bFmtUtf8":true,"v_songInfo":[{"songId":…,"songType":0/1}]}  → code 1000
   省略 tid、dirId 用字符串、换 android 档案 …                                             全部 code 1000
 ```
-写操作是上游最"保护"的一类，和搜索/推荐/歌手资料一样卡在**设备标识**上（Python 版之所以能写，
-是因为它的客户端带着 qimei 等设备参数）。所以本组件目前**不能收藏**——这正是为什么它还没有
-`set_liked` 的可用实现（代码在 `catalog::set_liked`，真跑返回上游码）。
+**关键对照实验（2026-09-30）**：让 **Python 版自己**执行同一个收藏写，它直接报
+
+```
+{"ok": false, "error": "CredentialExpiredError: 登录凭证已过期, 请重新登录"}
+```
+
+也就是**读接口用同一份凭据完全正常，写接口被拒**——库在写之前会 `check_expired`。
+本组件拿到的是上游码 `code 1000`，几乎肯定就是同一件事：**这份测试凭据对写操作已失效**。
+所以结论不是"写接口缺了某个参数"，而是"**写需要一次新登录**"。
+
+诚实的现状：`set_liked` 已实现（形状与库一致），但**未验证成功过**；它应当在**扫码登录成功之后**
+重新测。在此之前文档与 README 都按"未验证"对待它。
 
 **设备标识已实现**（`src/device.rs`：RSA+AES+MD5 的完整握手，实测拿到 q16/q36，设备持久化，
 密码学有 NIST/已知摘要的单测）。它**修好了歌手资料**（配合 android 档案与 comm 里的 `qq`/`authst`），
@@ -141,6 +150,17 @@ poll_login   GET ssl.ptlogin2.qq.com/ptqrlogin?ptqrtoken=<hash33(qrsig, 0)>  ✅
 **仍未验证**：扫码成功之后的 `check_sig` → `graph.qq.com/oauth2.0/authorize` → `QQLogin`
 三步（代码已按库实现写好，只有在有人真的扫码时才会执行）。请扫一次码验证，或等我在下一轮
 用一次真实扫码走完整条链。
+
+### 搜索：为什么它需要 android 档案 + 设备会话
+
+```
+music.search.SearchCgiService / DoSearchForQQMusicMobile
+{"searchid": <19 位>, "query": kw, "search_type": 0|1|2|3, "num_per_page": n,
+ "page_num": p, "highlight": false, "grp": true, "selectors": {}, "vec_selectors": []}
+→ 结果在 body.item_song / body.singer / body.item_album / body.item_songlist，总数在 meta.sum
+```
+歌单/歌手/专辑标题里会带 `<em>` 高亮标记（即使 `highlight: false`），组件统一剥掉。
+实测（关键词「周杰伦」）：歌曲 999 条、歌手 209 位、专辑 527 张、歌单 300 个。
 
 ## 状态## 状态
 

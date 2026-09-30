@@ -779,6 +779,12 @@ mod tests {
     }
 
     #[test]
+    fn search_highlight_markup_is_stripped() {
+        assert_eq!(strip_highlight("百听不厌的<em>周杰伦</em>"), "百听不厌的周杰伦");
+        assert_eq!(strip_highlight("无标记"), "无标记");
+    }
+
+    #[test]
     fn tag_lists_split_on_any_of_the_upstreams_separators() {
         assert_eq!(split_tags("Rock; Pop/Blues".into()), vec!["Rock", "Pop", "Blues"]);
         assert!(split_tags("  ".into()).is_empty());
@@ -825,4 +831,167 @@ pub fn set_liked(
         },
     )?;
     Ok(json!({ "songId": song_id, "liked": liked }))
+}
+
+// MARK: - Search
+
+/// Which kind of content a search asks for.
+///
+/// The numbers are the upstream's own `search_type`, and each kind answers under
+/// a different key in `body` — the reason this is one function with a mapping
+/// rather than four near-identical ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchKind {
+    Songs,
+    Artists,
+    Albums,
+    Playlists,
+}
+
+impl SearchKind {
+    fn search_type(self) -> i64 {
+        match self {
+            SearchKind::Songs => 0,
+            SearchKind::Artists => 1,
+            SearchKind::Albums => 2,
+            SearchKind::Playlists => 3,
+        }
+    }
+
+    fn body_key(self) -> &'static str {
+        match self {
+            SearchKind::Songs => "item_song",
+            SearchKind::Artists => "singer",
+            SearchKind::Albums => "item_album",
+            SearchKind::Playlists => "item_songlist",
+        }
+    }
+
+    /// What the results are called in the payload this returns.
+    pub fn payload_key(self) -> &'static str {
+        match self {
+            SearchKind::Songs => "tracks",
+            SearchKind::Artists => "artists",
+            SearchKind::Albums => "albums",
+            SearchKind::Playlists => "playlists",
+        }
+    }
+}
+
+/// Search the catalogue. Needs the android profile *and* the device session: it
+/// answers `meta.sum = 0` for everything without them.
+pub fn search(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    kind: SearchKind,
+    keyword: &str,
+    page: i64,
+    limit: i64,
+) -> Result<Value, UpstreamError> {
+    let keyword = keyword.trim();
+    if keyword.is_empty() {
+        return Ok(json!({ kind.payload_key(): [], "total": 0 }));
+    }
+    let data = upstream.call_with(
+        credential,
+        crate::Class::Interactive,
+        platform,
+        Call {
+            module: "music.search.SearchCgiService",
+            method: "DoSearchForQQMusicMobile",
+            param: json!({
+                "searchid": search_id(),
+                "query": keyword,
+                "search_type": kind.search_type(),
+                "num_per_page": limit,
+                "page_num": page.max(1),
+                "highlight": false,
+                "grp": true,
+                "selectors": {},
+                "vec_selectors": [],
+            }),
+        },
+    )?;
+    let body = first_object(&data, &["body"]).cloned().unwrap_or(json!({}));
+    let items = first_array(&body, &[kind.body_key()])
+        .cloned()
+        .unwrap_or_default();
+    let total = first_object(&data, &["meta"])
+        .and_then(|meta| first_int(meta, &["sum", "total"]))
+        .unwrap_or(items.len() as i64);
+
+    let mapped: Vec<Value> = match kind {
+        SearchKind::Songs => crate::methods::decoded_tracks(&json!({ "list": items })),
+        SearchKind::Artists => items.iter().filter_map(map_artist).collect(),
+        SearchKind::Albums => items.iter().filter_map(map_album).collect(),
+        SearchKind::Playlists => items.iter().filter_map(map_playlist).collect(),
+    };
+    Ok(json!({ kind.payload_key(): mapped, "total": total }))
+}
+
+/// The search call wants a session id; the upstream does not validate its shape,
+/// only that it looks like one.
+fn search_id() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    format!("{:019}", rng.gen_range(1_000_000_000_000_000_000u64..9_999_999_999_999_999_999))
+}
+
+fn map_artist(item: &Value) -> Option<Value> {
+    let mid = first_text(item, &["singerMID", "singerMid", "mid", "MID"])?;
+    Some(json!({
+        "singerMid": mid,
+        "name": strip_highlight(
+            first_text(item, &["singerName", "name", "Name"]).unwrap_or_else(|| "未知歌手".into())
+        ),
+        "coverURL": crate::methods::normalized_artwork_url(
+            first_text(item, &["singerPic", "pic", "avatarUrl"]).as_deref()
+        ),
+        "songCount": first_int(item, &["songNum", "songnum"]),
+        "albumCount": first_int(item, &["albumNum", "albumnum"]),
+        "fanCount": first_int(item, &["fansNum", "fanNum", "fans"]),
+    }))
+}
+
+fn map_album(item: &Value) -> Option<Value> {
+    let mid = first_text(item, &["albumMID", "albumMid", "albummid", "mid"]);
+    let id = first_int(item, &["albumID", "albumId", "id"])?;
+    Some(json!({
+        "id": id,
+        "title": strip_highlight(
+            first_text(item, &["albumName", "albumname", "name", "title"]).unwrap_or_default()
+        ),
+        "albumMid": mid,
+        "coverURL": crate::methods::normalized_artwork_url(
+            first_text(item, &["pic", "coverURL"])
+                .or_else(|| mid.clone().map(|mid| crate::methods::album_cover_url(&mid)))
+                .as_deref()
+        ),
+        "artist": first_text(item, &["singerName", "singername", "singer"]),
+        "releaseDate": first_text(item, &["publish_date", "publishDate", "time_public"]),
+    }))
+}
+
+/// Search results wrap the matched words in `<em>` even with `highlight: false`
+/// on some of the playlist routes, so the markup is stripped here (the library
+/// does the same before showing a title).
+fn strip_highlight(value: String) -> String {
+    value.replace("<em>", "").replace("</em>", "")
+}
+
+fn map_playlist(item: &Value) -> Option<Value> {
+    let id = first_int(item, &["dissid", "dissId", "id"])?;
+    Some(json!({
+        "id": id,
+        "title": strip_highlight(
+            first_text(item, &["dissname", "dissName", "title", "name"]).unwrap_or_default()
+        ),
+        "coverURL": crate::methods::normalized_artwork_url(
+            first_text(item, &["imgurl", "picurl", "cover"]).as_deref()
+        ),
+        "creator": first_text(item, &["creator", "nickname", "nick"]),
+        "songCount": first_int(item, &["songnum", "songCount"]),
+        "playCount": first_int(item, &["listennum", "playCount"]),
+    }))
 }
