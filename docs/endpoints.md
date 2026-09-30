@@ -15,6 +15,30 @@
 外加 `uin` 与 `g_tk = hash33(qm_keyst)`；授权靠 Cookie（`uin`、`qm_keyst`）。
 用库默认档案请求账号列表会被拒（`10004`）。
 
+## 实测状态（2026-09-30，真账号）
+
+实现落地后逐条跑过一遍，如实记录——**通过**的可以直接用，**待修**的已经知道要查什么：
+
+| 能力 | 第一次实测 | 结论 |
+|---|---|---|
+| `fetch_song_detail` | ✅ 不遗憾 / 简介 176 字 | 通过（web 档案即可） |
+| `fetch_radio_stations` | ✅ 11 组，首组「猜你喜欢」 | 通过 |
+| `fetch_new_songs` | ✅ 57 首，首条「回响」 | 通过 |
+| `resolve_song_url` | ✅ playable=true，quality=128，拿到 CDN 地址 | 音质阶梯与文件名构造正确 |
+| `fetch_album_tracks` | ❌ 0 条 | 响应键名或参数待修：先 dump 原始响应比对 |
+| `fetch_artist_songs` / `fetch_artist_albums` | ❌ 0 条 | 同上（同一参数的 Python 实现能取到，说明是键名/参数细节） |
+| `fetch_toplist_categories` | ❌ 0 组 | 同上（`GetAll` 的分组键名待确认） |
+| `fetch_lyric` | ❌ 空 | 四个 base64 字段一个都没解出来 → 键名或 `qrc/crypt` 组合待确认 |
+| `fetch_recommend_feed` | ❌ 0 首 | `get_radio_track` 的参数/响应键待确认 |
+| `fetch_artist_detail` | ❌ `10006` | 参数形状不对（`singer_mids` 的写法或需换 `GetSingerDetail` 之外的接口） |
+| `search_*`（四类） | 未实现 | web 与 android 两个档案都试过：`code 0` 但 `meta.sum = 0`，是**查询形状**问题（很可能缺真实 qimei 等设备参数），不是档案问题 |
+| `set_liked` / 扫码登录 | 未实现 | 形状已在下方列出 |
+
+**排查方法（下一步直接照做）**：同一个调用用 Python 版 helper 跑一遍并把原始响应落盘，
+与本组件的响应逐键对比——两者的 module/method/参数一致，差别只可能在
+① 响应键名（本组件用候选键取值，可能全都落空）② 平台档案 ③ 参数里被上游视为必需而我漏掉的字段。
+`docs/parsing.md` 里"字段名在不同接口里不同"那条是同一类问题的记录。
+
 ## 状态
 
 | 能力 | 方法名 | 上游 module / method | 参数要点 | 状态 |

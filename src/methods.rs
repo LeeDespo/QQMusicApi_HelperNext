@@ -37,10 +37,140 @@ pub const METHODS: &[&str] = &[
     "fetch_followed_artists",
     "fetch_playlist_tracks",
     "get_status",
+    // Catalogue prose, an artist's works and an album's tracks.
+    "fetch_song_detail",
+    "fetch_album_detail",
+    "fetch_album_tracks",
+    "fetch_artist_songs",
+    "fetch_artist_albums",
+    "fetch_artist_detail",
+    // Rankings, radio, new songs and the recommendation feed.
+    "fetch_toplist_categories",
+    "fetch_toplist_tracks",
+    "fetch_radio_stations",
+    "fetch_radio_tracks",
+    "fetch_new_songs",
+    "fetch_recommend_feed",
+    // Lyrics and playback urls.
+    "fetch_lyric",
+    "resolve_song_url",
 ];
 
 pub fn is_known(method: &str) -> bool {
     METHODS.contains(&method)
+}
+
+/// Payload for one method, returned as a JSON object the CLI hands straight back
+/// and the typed API parses into a model. Endpoints live in `catalog`; this is
+/// the name-to-endpoint table plus the small account reads that were here first.
+fn catalog_dispatch(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    method: &str,
+    params: &Value,
+) -> Option<Result<Value, UpstreamError>> {
+    let text = |key: &str| first_text(params, &[key]).unwrap_or_default();
+    let int = |key: &str| first_int(params, &[key]);
+    let result = match method {
+        "fetch_song_detail" => crate::catalog::song_detail(upstream, credential, platform, &text("songMid")),
+        "fetch_album_detail" => crate::catalog::album_detail(
+            upstream,
+            credential,
+            platform,
+            first_text(params, &["albumMid"]).as_deref(),
+            int("albumId"),
+        ),
+        "fetch_album_tracks" => crate::catalog::album_tracks(
+            upstream,
+            credential,
+            platform,
+            first_text(params, &["albumMid"]).as_deref(),
+            int("albumId"),
+            int("offset").unwrap_or(0),
+            round(int("limit"), 200, 1, 200),
+        )
+        .map(|tracks| json!({ "tracks": tracks })),
+        "fetch_artist_songs" => crate::catalog::artist_songs(
+            upstream,
+            credential,
+            platform,
+            &text("singerMid"),
+            &first_text(params, &["sort"]).unwrap_or_else(|| "hot".into()),
+            int("page").unwrap_or(1),
+            round(int("limit"), 50, 1, 100),
+        )
+        .map(|tracks| json!({ "tracks": tracks })),
+        "fetch_artist_albums" => crate::catalog::artist_albums(
+            upstream,
+            credential,
+            platform,
+            &text("singerMid"),
+            &first_text(params, &["sort"]).unwrap_or_else(|| "hot".into()),
+            int("page").unwrap_or(1),
+            round(int("limit"), 50, 1, 100),
+        )
+        .map(|albums| json!({ "albums": albums })),
+        "fetch_artist_detail" => crate::catalog::artist_detail(upstream, credential, platform, &text("singerMid"))
+            .map(|detail| json!({ "detail": detail })),
+        "fetch_toplist_categories" => crate::catalog::toplist_categories(upstream, credential, platform)
+            .map(|groups| json!({ "toplistGroups": groups })),
+        "fetch_toplist_tracks" => crate::catalog::toplist_tracks(
+            upstream,
+            credential,
+            platform,
+            int("topId").unwrap_or(0),
+            int("offset").unwrap_or(0),
+            round(int("limit"), 100, 1, 300),
+        )
+        .map(|tracks| json!({ "tracks": tracks })),
+        "fetch_radio_stations" => crate::catalog::radio_stations(upstream, credential, platform)
+            .map(|groups| json!({ "radioGroups": groups })),
+        "fetch_radio_tracks" => crate::catalog::radio_tracks(
+            upstream,
+            credential,
+            platform,
+            int("stationId").unwrap_or(0),
+            round(int("limit"), 20, 1, 50),
+            params.get("firstPlay").and_then(Value::as_bool).unwrap_or(true),
+        )
+        .map(|tracks| json!({ "tracks": tracks })),
+        "fetch_new_songs" => crate::catalog::new_songs(
+            upstream,
+            credential,
+            platform,
+            int("regionType").unwrap_or(0),
+        )
+        .map(|tracks| json!({ "tracks": tracks })),
+        "fetch_recommend_feed" => crate::catalog::recommend_feed(upstream, credential, platform)
+            .map(|tracks| json!({ "tracks": tracks })),
+        "fetch_lyric" => crate::catalog::lyric(
+            upstream,
+            credential,
+            platform,
+            &text("songMid"),
+            int("songId"),
+            params.get("wordTiming").and_then(Value::as_bool).unwrap_or(true),
+            params.get("translation").and_then(Value::as_bool).unwrap_or(true),
+        )
+        .map(|lyric| json!({ "lyric": lyric })),
+        "resolve_song_url" => crate::catalog::stream_url(
+            upstream,
+            credential,
+            platform,
+            &text("songMid"),
+            first_text(params, &["mediaMid"]).as_deref(),
+            int("songType").unwrap_or(0),
+            first_text(params, &["quality"]).as_deref(),
+        )
+        .map(|stream| json!({ "stream": stream })),
+        _ => return None,
+    };
+    Some(result)
+}
+
+fn round(value: Option<i64>, default: i64, low: i64, high: i64) -> i64 {
+    value.unwrap_or(default).clamp(low, high)
 }
 
 /// The platform profile this request asks for: `params.platform` when given
@@ -62,6 +192,10 @@ pub fn dispatch(
     params: &Value,
 ) -> Result<Value, UpstreamError> {
     let account = credential.cloned().unwrap_or_default();
+    let platform = platform_for(params, crate::upstream::Platform::default());
+    if let Some(result) = catalog_dispatch(upstream, &account, platform, method, params) {
+        return result;
+    }
     match method {
         "get_helper_info" => Ok(json!({
             "helper": {
@@ -342,7 +476,7 @@ fn require_login(credential: &Credential) -> Result<(), UpstreamError> {
 /// keyed by code), so the mapping is written against the widest set and every
 /// accessor takes alternatives — the same approach the Python helper's
 /// `_track_payload` used.
-fn decoded_tracks(data: &Value) -> Vec<Value> {
+pub fn decoded_tracks(data: &Value) -> Vec<Value> {
     let items = first_array(data, &["songlist", "songs", "list"]).cloned().unwrap_or_default();
     items.iter().filter_map(decode_track).collect()
 }
@@ -431,7 +565,7 @@ fn civil_date_from_unix(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
-fn album_cover_url(mid: &str) -> String {
+pub fn album_cover_url(mid: &str) -> String {
     format!("https://y.gtimg.cn/music/photo_new/T002R800x800M000{mid}.jpg")
 }
 
@@ -439,7 +573,7 @@ fn album_cover_url(mid: &str) -> String {
 ///
 /// The upstream hands back `http://y.gtimg.cn/...` and the app has no ATS
 /// exception, so an http cover is refused outright and stays blank.
-fn normalized_artwork_url(value: Option<&str>) -> Option<String> {
+pub fn normalized_artwork_url(value: Option<&str>) -> Option<String> {
     let value = value.filter(|value| !value.is_empty())?;
     if let Some(rest) = value.strip_prefix("http://") {
         return Some(format!("https://{rest}"));

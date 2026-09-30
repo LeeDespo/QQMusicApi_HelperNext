@@ -182,3 +182,125 @@ mod tests {
         assert_eq!(track.singers.as_ref().map(Vec::len), Some(1));
     }
 }
+
+/// A song's catalogue entry: the facts plus the prose the service publishes.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SongDetail {
+    pub song_mid: String,
+    pub song_id: Option<i64>,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_mid: Option<String>,
+    /// The 简介. Empty for most songs, which is an answer and not a failure.
+    pub description: String,
+    pub genre: Vec<String>,
+    pub language: Option<String>,
+    pub company: Option<String>,
+    pub release_date: Option<String>,
+    pub duration: Option<i64>,
+}
+
+/// An album's catalogue entry.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumDetail {
+    pub id: Option<i64>,
+    pub album_mid: Option<String>,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    #[serde(rename = "coverURL")]
+    pub cover_url: Option<String>,
+    pub description: Option<String>,
+    pub release_date: Option<String>,
+    pub genre: Option<String>,
+    pub language: Option<String>,
+    pub company: Option<String>,
+    pub song_count: Option<i64>,
+}
+
+/// An artist's profile.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistDetail {
+    pub singer_mid: String,
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "coverURL")]
+    pub cover_url: Option<String>,
+    pub foreign_name: Option<String>,
+    pub region: Option<String>,
+    pub genre: Vec<String>,
+    pub song_count: Option<i64>,
+    pub album_count: Option<i64>,
+    pub fan_count: Option<i64>,
+}
+
+/// One ranking inside a group.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Toplist {
+    pub id: i64,
+    pub title: String,
+    #[serde(rename = "coverURL")]
+    pub cover_url: Option<String>,
+    pub update_time: Option<String>,
+}
+
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ToplistGroup {
+    pub title: String,
+    pub toplists: Vec<Toplist>,
+}
+
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioStation {
+    pub id: i64,
+    pub title: String,
+    #[serde(rename = "coverURL")]
+    pub cover_url: Option<String>,
+}
+
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioGroup {
+    pub title: String,
+    pub stations: Vec<RadioStation>,
+}
+
+/// A lyric and the extra tracks the service offers with it. `word_lyric` is the
+/// word-level one (the reason the helper channel ever existed).
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Lyric {
+    pub lyric: Option<String>,
+    pub translation: Option<String>,
+    pub romanization: Option<String>,
+    pub word_lyric: Option<String>,
+}
+
+/// A resolved playback url, or why there is none.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamResolution {
+    pub song_mid: String,
+    /// `flac` / `320` / `128` / `aac` when `playable`.
+    pub quality: Option<String>,
+    pub filename: Option<String>,
+    pub url: Option<String>,
+    pub playable: bool,
+    /// Present when nothing was granted: what each quality answered.
+    pub reason: Option<String>,
+}

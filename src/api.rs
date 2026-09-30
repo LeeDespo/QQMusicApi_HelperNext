@@ -142,30 +142,232 @@ mod tests {
     use super::*;
     use crate::methods::METHODS;
 
-    /// Every exported function has a protocol method behind it, and every
-    /// protocol method has a typed wrapper. Adding one without the other is the
-    /// easy mistake, and it would show up as "works from the CLI, fails from
-    /// Swift" much later.
+    /// Every protocol method has a typed wrapper in this file.
+    ///
+    /// Adding an endpoint without its wrapper is the easy mistake, and it would
+    /// surface as "works from the CLI, missing from the bindings" much later.
     #[test]
     fn api_surface_matches() {
-        let covered = [
-            "get_helper_info",
-            "get_login_status",
-            "import_cookies",
-            "logout",
-            "fetch_liked_songs",
-            "fetch_playlist_tracks",
-            "fetch_user_playlists",
-            "fetch_liked_albums",
-            "fetch_followed_artists",
-            "get_status",
+        let source = include_str!("api.rs");
+        // `import_cookies` is the protocol name; the typed wrapper is
+        // `import_credential` (the two-field form the generator can render).
+        // The protocol names and the typed wrappers differ where the wrapper
+        // reads better (`get_helper_info` → `component_info`).
+        let aliases = [
+            ("import_cookies", "import_credential"),
+            ("get_helper_info", "component_info"),
+            ("get_status", "guard_status"),
+            ("get_login_status", "login_status"),
+            ("fetch_liked_songs", "liked_songs"),
+            ("fetch_playlist_tracks", "playlist_tracks"),
+            ("fetch_user_playlists", "user_playlists"),
+            ("fetch_liked_albums", "liked_albums"),
+            ("fetch_followed_artists", "followed_artists"),
+            ("fetch_song_detail", "song_detail"),
+            ("fetch_album_detail", "album_detail"),
+            ("fetch_album_tracks", "album_tracks"),
+            ("fetch_artist_songs", "artist_songs"),
+            ("fetch_artist_albums", "artist_albums"),
+            ("fetch_artist_detail", "artist_detail"),
+            ("fetch_toplist_categories", "toplist_categories"),
+            ("fetch_toplist_tracks", "toplist_tracks"),
+            ("fetch_radio_stations", "radio_stations"),
+            ("fetch_radio_tracks", "radio_tracks"),
+            ("fetch_new_songs", "new_songs"),
+            ("fetch_recommend_feed", "recommend_feed"),
+            ("fetch_lyric", "lyric"),
+            ("resolve_song_url", "resolve_song_url"),
         ];
         for method in METHODS {
+            // Wrappers name the method they call, so the method string appearing
+            // in a `call("…")` (or a matching arm) is the check.
+            let wrapper = aliases
+                .iter()
+                .find(|(protocol, _)| protocol == method)
+                .map(|(_, wrapper)| *wrapper)
+                .unwrap_or(*method);
             assert!(
-                covered.contains(method),
-                "method {method} has no typed wrapper in api.rs"
+                source.contains(&format!("pub fn {wrapper}")),
+                "method {method} has no typed wrapper ({wrapper}) in api.rs"
             );
         }
-        assert_eq!(covered.len(), METHODS.len());
     }
+}
+
+// MARK: - Catalogue prose, an artist's works, an album's tracks
+
+/// A song's catalogue entry, including its 简介 (empty when it has none).
+#[export]
+pub fn song_detail(song_mid: String) -> Result<crate::models::SongDetail, HelperError> {
+    call("fetch_song_detail", json!({ "songMid": song_mid }))
+}
+
+/// An album's catalogue entry. Address it by mid or by its numeric id.
+#[export]
+pub fn album_detail(
+    album_mid: Option<String>,
+    album_id: Option<i64>,
+) -> Result<crate::models::AlbumDetail, HelperError> {
+    call("fetch_album_detail", json!({ "albumMid": album_mid, "albumId": album_id }))
+}
+
+/// An album's tracks.
+#[export]
+pub fn album_tracks(
+    album_mid: Option<String>,
+    album_id: Option<i64>,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<crate::models::Track>, HelperError> {
+    call(
+        "fetch_album_tracks",
+        json!({ "albumMid": album_mid, "albumId": album_id, "offset": offset, "limit": limit }),
+    )
+}
+
+/// An artist's songs. `sort` is `hot` or `latest` ("最新" is computed locally —
+/// the upstream ignores its ordering parameter).
+#[export]
+pub fn artist_songs(
+    singer_mid: String,
+    sort: String,
+    page: i64,
+    limit: i64,
+) -> Result<Vec<crate::models::Track>, HelperError> {
+    call("fetch_artist_songs", json!({ "singerMid": singer_mid, "sort": sort, "page": page, "limit": limit }))
+}
+
+/// An artist's albums, same two sorts.
+#[export]
+pub fn artist_albums(
+    singer_mid: String,
+    sort: String,
+    page: i64,
+    limit: i64,
+) -> Result<Vec<crate::models::Album>, HelperError> {
+    call("fetch_artist_albums", json!({ "singerMid": singer_mid, "sort": sort, "page": page, "limit": limit }))
+}
+
+/// An artist's profile and biography.
+#[export]
+pub fn artist_detail(singer_mid: String) -> Result<crate::models::ArtistDetail, HelperError> {
+    call("fetch_artist_detail", json!({ "singerMid": singer_mid }))
+}
+
+// MARK: - Rankings, radio, new songs, recommendations
+
+/// The ranking groups, each with the rankings it contains.
+#[export]
+pub fn toplist_categories() -> Result<Vec<crate::models::ToplistGroup>, HelperError> {
+    call("fetch_toplist_categories", json!({}))
+}
+
+/// One ranking's tracks.
+#[export]
+pub fn toplist_tracks(
+    top_id: i64,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<crate::models::Track>, HelperError> {
+    call("fetch_toplist_tracks", json!({ "topId": top_id, "offset": offset, "limit": limit }))
+}
+
+/// The radio groups, each with its stations.
+#[export]
+pub fn radio_stations() -> Result<Vec<crate::models::RadioGroup>, HelperError> {
+    call("fetch_radio_stations", json!({}))
+}
+
+/// A station's next songs (a fresh rotation on every call).
+#[export]
+pub fn radio_tracks(
+    station_id: i64,
+    limit: i64,
+    first_play: bool,
+) -> Result<Vec<crate::models::Track>, HelperError> {
+    call("fetch_radio_tracks", json!({ "stationId": station_id, "limit": limit, "firstPlay": first_play }))
+}
+
+/// New songs for one region: 0 最新, 1 内地, 2 港台, 3 欧美, 4 日本, 5 韩国.
+#[export]
+pub fn new_songs(region_type: i64) -> Result<Vec<crate::models::Track>, HelperError> {
+    call("fetch_new_songs", json!({ "regionType": region_type }))
+}
+
+/// "Guess you like" — five fresh tracks per call.
+#[export]
+pub fn recommend_feed() -> Result<Vec<crate::models::Track>, HelperError> {
+    call("fetch_recommend_feed", json!({}))
+}
+
+// MARK: - Lyrics and playback urls
+
+/// A song's lyric. `word_timing` asks for the word-level track; `translation`
+/// asks for the translation and romanisation when the service has them.
+#[export]
+pub fn lyric(
+    song_mid: String,
+    song_id: Option<i64>,
+    word_timing: bool,
+    translation: bool,
+) -> Result<crate::models::Lyric, HelperError> {
+    call(
+        "fetch_lyric",
+        json!({
+            "songMid": song_mid,
+            "songId": song_id,
+            "wordTiming": word_timing,
+            "translation": translation,
+        }),
+    )
+}
+
+/// A playable url for one track, probing the quality ladder best-first.
+///
+/// `preferred_quality` narrows the probe to one rung; leaving it unset walks the
+/// ladder and returns the first grant. A track the account may not play comes
+/// back with `playable: false` and the reason — not as an error.
+#[export]
+pub fn resolve_song_url(
+    song_mid: String,
+    media_mid: Option<String>,
+    song_type: i64,
+    preferred_quality: Option<String>,
+) -> Result<crate::models::StreamResolution, HelperError> {
+    call(
+        "resolve_song_url",
+        json!({
+            "songMid": song_mid,
+            "mediaMid": media_mid,
+            "songType": song_type,
+            "quality": preferred_quality,
+        }),
+    )
+}
+
+// MARK: - Choosing the platform profile per call
+
+/// Send a request under an explicit platform profile.
+///
+/// The typed wrappers above use the host's configured default; this is the
+/// documented way to reach the other profile for a single interface without
+/// rebuilding. `params_json` is the same object the protocol layer takes, and
+/// the result is the raw payload as JSON.
+#[export]
+pub fn call_with_platform(
+    method: String,
+    params_json: String,
+    platform: String,
+) -> Result<String, HelperError> {
+    let parsed: Value = serde_json::from_str(&params_json)
+        .map_err(|error| HelperError::InvalidRequest(error.to_string()))?;
+    let profile = crate::Platform::parse(&platform)
+        .ok_or_else(|| HelperError::InvalidRequest(format!("未知的平台档案：{platform}")))?;
+    let mut object = match parsed {
+        Value::Object(map) => map,
+        _ => return Err(HelperError::InvalidRequest("params 必须是 JSON 对象".into())),
+    };
+    object.insert("platform".into(), Value::String(profile.as_str().into()));
+    let value = call::<Value>(&method, Value::Object(object))?;
+    serde_json::to_string(&value).map_err(|error| HelperError::Upstream(error.to_string()))
 }

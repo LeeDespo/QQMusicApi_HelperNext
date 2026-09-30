@@ -17,6 +17,7 @@
 //! // platform directory — the component never guesses.
 //! qqmusic_api_helper_next::configure(qqmusic_api_helper_next::Configuration {
 //!     data_dir: "/path/to/app-support".into(),
+//!     default_platform: qqmusic_api_helper_next::Platform::Web,
 //! });
 //!
 //! let status = qqmusic_api_helper_next::api::login_status()?;
@@ -34,6 +35,7 @@
 //! HTTP agent, the rate limiter, the breaker and the credential store are shared
 //! behind mutexes, and no call holds a lock across the network.
 
+mod catalog;
 mod guard;
 pub mod methods;
 mod upstream;
@@ -66,6 +68,15 @@ pub struct Configuration {
 }
 
 static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
+
+/// The platform profile calls use by default: the host's choice, or the web
+/// profile when none was configured.
+pub fn default_platform() -> Platform {
+    CONFIGURATION
+        .get()
+        .map(|configuration| configuration.default_platform)
+        .unwrap_or_default()
+}
 
 /// Set the host's configuration. The first call wins, deliberately: a second
 /// caller cannot move the credential directory out from under a running session.
