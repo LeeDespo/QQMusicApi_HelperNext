@@ -304,3 +304,30 @@ pub struct StreamResolution {
     /// Present when nothing was granted: what each quality answered.
     pub reason: Option<String>,
 }
+
+/// A login QR code: what to draw, and what to poll it with.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginQrCode {
+    /// The `qrsig`: hand it back to `poll_login`.
+    pub identifier: String,
+    /// `"qq"` for the scan-with-QQ flow.
+    pub login_type: String,
+    pub mimetype: String,
+    /// A PNG, base64-encoded — the shape a host can draw directly.
+    pub image_base64: String,
+}
+
+/// One poll of a login QR code.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginPoll {
+    /// `SCAN` (not scanned yet), `CONF` (scanned, awaiting confirmation),
+    /// `DONE`, `TIMEOUT` or `REFUSE`.
+    pub event: String,
+    pub logged_in: bool,
+    /// Present once `logged_in`: who just logged in.
+    pub login: Option<LoginStatus>,
+}

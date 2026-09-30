@@ -56,6 +56,9 @@ pub const METHODS: &[&str] = &[
     "resolve_song_url",
     // The one write.
     "set_liked",
+    // Logging in without a host that can produce cookies.
+    "start_login",
+    "poll_login",
 ];
 
 pub fn is_known(method: &str) -> bool {
@@ -172,6 +175,22 @@ fn catalog_dispatch(
             params.get("translation").and_then(Value::as_bool).unwrap_or(true),
         )
         .map(|lyric| json!({ "lyric": lyric })),
+        "start_login" => crate::login::start_login(upstream).map(|qr| {
+            json!({
+                "qrcode": {
+                    "identifier": qr.identifier,
+                    "loginType": "qq",
+                    "mimetype": qr.mimetype,
+                    "imageBase64": qr.image_base64,
+                }
+            })
+        }),
+        "poll_login" => crate::login::poll_login(
+            upstream,
+            &crate::credential::CredentialStore::for_directory(&crate::data_directory()),
+            &text("identifier"),
+        )
+        .map(|result| json!({ "login": result })),
         "set_liked" => crate::catalog::set_liked(
             upstream,
             credential,

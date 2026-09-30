@@ -177,6 +177,8 @@ mod tests {
             ("fetch_recommend_feed", "recommend_feed"),
             ("fetch_lyric", "lyric"),
             ("resolve_song_url", "resolve_song_url"),
+            ("start_login", "start_login"),
+            ("poll_login", "poll_login"),
         ];
         for method in METHODS {
             // Wrappers name the method they call, so the method string appearing
@@ -380,4 +382,20 @@ pub fn set_liked(song_id: i64, song_type: i64, liked: bool) -> Result<(), Helper
         json!({ "songId": song_id, "songType": song_type, "liked": liked }),
     )?;
     Ok(())
+}
+
+// MARK: - Logging in
+
+/// Start a QQ scan-to-login: returns the code to draw and the identifier to
+/// poll with.
+#[export]
+pub fn start_login() -> Result<crate::models::LoginQrCode, HelperError> {
+    call("start_login", json!({}))
+}
+
+/// Ask what the scan has done; on the last step it stores the credential and
+/// reports `logged_in`.
+#[export]
+pub fn poll_login(identifier: String) -> Result<crate::models::LoginPoll, HelperError> {
+    call("poll_login", json!({ "identifier": identifier }))
 }

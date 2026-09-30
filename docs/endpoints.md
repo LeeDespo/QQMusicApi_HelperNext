@@ -123,6 +123,22 @@ music.musicasset.PlaylistDetailWrite / AddSonglist
 （`device.session_uid` / `session_sid` / `session_vkey`，由一次单独的登录步骤写入）。
 详见 `docs/parsing.md` 第 11 条。
 
+### 5. 扫码登录：二维码拿到了，轮询被 `403`
+
+```
+start_login  GET ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&…   ✅ 实测返回 PNG（432 字节，PNG 魔数正确）
+             + Set-Cookie: qrsig=<128 字符>                        ✅ 作为 identifier 回给调用方
+poll_login   GET ssl.ptlogin2.qq.com/ptqrlogin?ptqrtoken=hash33(qrsig)&…  ❌ HTTP 403
+             已带 Referer: https://xui.ptlogin2.qq.com/、Origin、浏览器 UA、qrsig cookie。
+```
+
+后续步骤（`check_sig` → `graph.qq.com/oauth2.0/authorize` → `QQConnectLogin.LoginServer/QQLogin`）
+代码已按库的实现写好，但**没有验证过**——它们只在扫码成功之后才会走到。
+
+**排查方向**（下一步照做）：把 Python helper 的同一次轮询用抓包/日志记下完整请求头与 cookie 集合，
+与本组件的请求逐项比对。ptlogin2 的 403 通常来自缺 cookie（它可能要求 ptqrshow 之外的
+`pt_login_sig` 等）或缺 `Accept` / `Accept-Language` 这类浏览器头。
+
 ## 状态
 
 | 能力 | 方法名 | 上游 module / method | 参数要点 | 状态 |

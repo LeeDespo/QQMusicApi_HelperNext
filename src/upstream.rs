@@ -129,6 +129,49 @@ impl Upstream {
         }
     }
 
+    /// An agent for the login handshake: no redirect following, because two of
+    /// its steps answer with the redirect *as the result* (the cookie on the
+    /// response, and the `code` in its `Location`).
+    pub fn login_agent(&self) -> ureq::Agent {
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(20)))
+            .max_redirects(0)
+            .build()
+            .into()
+    }
+
+    /// Run one call with an explicit `tmeLoginType` in `comm`.
+    ///
+    /// The login endpoints select their behaviour with it (2 for the QQ Connect
+    /// exchange, 6 for the phone scanner), and it is not a device property, so
+    /// it is a parameter here rather than something the profile decides.
+    pub fn call_with_tme_login_type(
+        &self,
+        credential: &Credential,
+        platform: Platform,
+        login_type: i64,
+        call: Call,
+    ) -> Result<Value, UpstreamError> {
+        let mut body = self.envelope(credential, platform, vec![call])?;
+        if let Some(comm) = body.get_mut("comm").and_then(serde_json::Value::as_object_mut) {
+            comm.insert("tmeLoginType".into(), json!(login_type));
+        }
+        let response = self.post_json(credential, Class::Account, MUSICU_ENDPOINT, &body, &[])?;
+        let slot = response
+            .get("req_0")
+            .ok_or_else(|| UpstreamError::Upstream("响应里没有 req_0".into()))?;
+        let code = slot.get("code").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        match slot.get("data") {
+            Some(serde_json::Value::Object(data)) if !data.is_empty() => {
+                Ok(serde_json::Value::Object(data.clone()))
+            }
+            _ => Err(UpstreamError::Upstream(format!(
+                "上游返回错误（{code}）：{}",
+                slot.get("msg").and_then(serde_json::Value::as_str).unwrap_or("")
+            ))),
+        }
+    }
+
     /// The device the component presents, and the identity it has for it.
     pub fn device(&self) -> &DeviceStore {
         &self.device

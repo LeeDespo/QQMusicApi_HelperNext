@@ -55,6 +55,16 @@ impl Credential {
         )
     }
 
+    /// Build a credential from a login response's payload.
+    ///
+    /// The login endpoints answer with the same field names the credential file
+    /// uses, so the whole object is kept: fields this component does not read
+    /// (a refresh token, for instance) must survive a save.
+    pub fn from_json(value: &Value) -> Option<Self> {
+        let credential = Self::from_value(value);
+        credential.is_usable().then_some(credential)
+    }
+
     fn from_value(value: &Value) -> Self {
         let music_id = value
             .get("str_musicid")

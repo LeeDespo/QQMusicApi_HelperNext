@@ -38,6 +38,7 @@
 mod catalog;
 pub mod device;
 mod guard;
+pub mod login;
 pub mod methods;
 mod upstream;
 
