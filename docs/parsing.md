@@ -97,12 +97,20 @@ helper 单测全绿，接进应用就"卡 15 秒"。`with_id` 现在集中处理
 | `fetch_recommend_feed`（猜你喜欢） | ❌ 仍然 0 |
 | `set_liked`（收藏，写） | ❌ 仍然 `code 1000` |
 
-**下一个嫌疑：设备的"会话"（`uid`/`sid`/`vkey`）。** 依据有两条：
-① 库的 android 公共参数里除了 QIMEI 还带 `uid=device.session_uid`、`sid=device.session_sid`；
-② 它的设备存储里就有 `session_uid` / `session_sid` / `session_vkey` 三个字段，由一次
-**单独的登录步骤**写进去（`core/api_context.py` 里从某个 login 响应里取 uid/sid/vkey）。
-也就是说这些接口要的是"登录过的设备会话"，而不只是"设备指纹"。
-本组件目前发的是空 `uid`/`sid`——下一步就是把那次会话登录做出来。
+### 会话（`uid`/`sid`）：已实现，且**修好了猜你喜欢**
+
+```
+POST musicu.fcg  module = music.getSession.session, method = GetSession
+param = {"uid": "", "vkey": 0, "caller": 0}     （comm 必须是 android 那一套 + QIMEI）
+→ data.session.{uid, sid, vkey}                 组件缓存 24 小时，随后的 android 调用带上 uid/sid
+```
+实测：`uid=6791462615`、`sid=20260930193553` 拿到并持久化，**猜你喜欢立刻从 0 变 5 首**
+（Only you can save me / かいじゅうのマーチ / I Remember）。所以这些接口要的是
+"**登录过的设备会话**"，而不只是"设备指纹"——两个都要。
+
+**仍然失败的只剩收藏（写）**：`code 1000`。设备指纹与会话都齐了之后还是 1000，
+说明写操作还要别的东西（可能是与登录方式匹配的 `tmeLoginType`，或者用真正登录态建立的凭据）。
+下一步排查方向：与 Python 版**逐字段**比对同一次写请求的 comm（两边都 dump 原始请求体）。
 
 ## 12. 历史记录：三个接口同因的排查过程（已由第 11 条取代）
 

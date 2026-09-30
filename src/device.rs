@@ -87,6 +87,18 @@ pub struct Device {
     pub qimei: Option<String>,
     pub qimei36: Option<String>,
     pub qimei_at: Option<i64>,
+    /// The *session* the android interfaces want, which is a different thing
+    /// from the device identity: `uid`/`sid` come from a login step of their
+    /// own (`music.getSession.session`), and some interfaces answer nothing
+    /// without them (`docs/parsing.md` §11).
+    #[serde(default)]
+    pub session_uid: Option<String>,
+    #[serde(default)]
+    pub session_sid: Option<String>,
+    #[serde(default)]
+    pub session_vkey: Option<Option<String>>,
+    #[serde(default)]
+    pub session_at: Option<i64>,
 }
 
 impl Default for Device {
@@ -106,6 +118,10 @@ impl Default for Device {
             qimei: None,
             qimei36: None,
             qimei_at: None,
+            session_uid: None,
+            session_sid: None,
+            session_vkey: None,
+            session_at: None,
         }
     }
 }
@@ -113,6 +129,18 @@ impl Default for Device {
 impl Device {
     pub fn os_version_text(&self) -> String {
         format!("Android {},level {}", self.os_release, self.os_sdk)
+    }
+
+    /// The session pair, when it is still valid (a day, as the library treats it).
+    pub fn fresh_session(&self) -> Option<(String, String)> {
+        match (&self.session_uid, &self.session_sid, self.session_at) {
+            (Some(uid), Some(sid), Some(at))
+                if !uid.is_empty() && !sid.is_empty() && now() - at < IDENTITY_TTL_SECONDS =>
+            {
+                Some((uid.clone(), sid.clone()))
+            }
+            _ => None,
+        }
     }
 
     fn has_fresh_identity(&self) -> bool {
@@ -147,6 +175,16 @@ impl DeviceStore {
         let device = Device::default();
         self.save(&device);
         device
+    }
+
+    /// Record a session the caller obtained, and persist it.
+    pub fn apply_session(&self, uid: &str, sid: &str, vkey: Option<String>) {
+        let mut device = self.load_or_create();
+        device.session_uid = Some(uid.to_string());
+        device.session_sid = Some(sid.to_string());
+        device.session_vkey = Some(vkey);
+        device.session_at = Some(now());
+        self.save(&device);
     }
 
     fn save(&self, device: &Device) {

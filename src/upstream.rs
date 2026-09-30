@@ -224,38 +224,19 @@ impl Upstream {
             comm.insert(key.into(), value);
         }
         if platform == Platform::Android {
-            // The android profile authenticates *in the body* as well as with
-            // cookies — this is what the library sends, and the interfaces that
-            // refused every other shape (the artist header, search, the feed and
-            // the writes) accept this one.
-            if !credential.music_id.is_empty() {
-                comm.insert("qq".into(), json!(credential.music_id));
+            for (key, value) in self.android_comm(credential) {
+                comm.insert(key, value);
             }
-            if !credential.music_key.is_empty() {
-                comm.insert("authst".into(), json!(credential.music_key));
+            // The session is what the search, feed and write endpoints want on
+            // top of the device identity; an empty one is sent when the login
+            // step has not happened yet, and those endpoints say so themselves.
+            if let Some((uid, sid)) = self.ensure_session(credential) {
+                comm.insert("uid".into(), json!(uid));
+                comm.insert("sid".into(), json!(sid));
+            } else {
+                comm.insert("uid".into(), json!(""));
+                comm.insert("sid".into(), json!(""));
             }
-            comm.insert("tmeAppID".into(), json!("qqmusic"));
-            comm.insert("tmeLoginType".into(), json!(1));
-            comm.insert("chid".into(), json!("10003505"));
-            let device = self.device.load_or_create();
-            comm.insert("OpenUDID".into(), json!(device.open_udid));
-            comm.insert("OpenUDID2".into(), json!(device.open_udid));
-            comm.insert("udid".into(), json!(device.open_udid));
-            comm.insert("aid".into(), json!(device.android_id));
-            comm.insert("os_ver".into(), json!(device.os_version_text()));
-            comm.insert("phonetype".into(), json!(device.model));
-            comm.insert("devicelevel".into(), json!(device.os_sdk));
-            comm.insert("newdevicelevel".into(), json!(device.os_sdk));
-            comm.insert("rom".into(), json!(device.proc_version));
-            // Empty strings when the identity could not be fetched: every
-            // interface that does not need it still works, and the ones that do
-            // answer with their own error rather than a transport failure.
-            let (q16, q36) = self
-                .device
-                .qimei(&self.agent)
-                .unwrap_or_else(|| (String::new(), String::new()));
-            comm.insert("QIMEI".into(), json!(q16));
-            comm.insert("QIMEI36".into(), json!(q36));
         }
         let mut body = json!({ "comm": comm });
         for (index, call) in calls.into_iter().enumerate() {
@@ -266,6 +247,93 @@ impl Upstream {
             });
         }
         Ok(body)
+    }
+
+    /// The android profile's own `comm` fields: the credential in the body, the
+    /// device, and the QIMEI identity. No `uid`/`sid` — those are the session,
+    /// and asking for the session needs this block already assembled.
+    fn android_comm(&self, credential: &Credential) -> Vec<(String, serde_json::Value)> {
+        let mut fields: Vec<(String, serde_json::Value)> = Vec::new();
+        if !credential.music_id.is_empty() {
+            fields.push(("qq".into(), json!(credential.music_id)));
+        }
+        if !credential.music_key.is_empty() {
+            fields.push(("authst".into(), json!(credential.music_key)));
+        }
+        fields.push(("tmeAppID".into(), json!("qqmusic")));
+        fields.push(("tmeLoginType".into(), json!(1)));
+        fields.push(("chid".into(), json!("10003505")));
+        let device = self.device.load_or_create();
+        fields.push(("OpenUDID".into(), json!(device.open_udid)));
+        fields.push(("OpenUDID2".into(), json!(device.open_udid)));
+        fields.push(("udid".into(), json!(device.open_udid)));
+        fields.push(("aid".into(), json!(device.android_id)));
+        fields.push(("os_ver".into(), json!(device.os_version_text())));
+        fields.push(("phonetype".into(), json!(device.model)));
+        fields.push(("devicelevel".into(), json!(device.os_sdk)));
+        fields.push(("newdevicelevel".into(), json!(device.os_sdk)));
+        fields.push(("rom".into(), json!(device.proc_version)));
+        let (q16, q36) = self
+            .device
+            .qimei(&self.agent)
+            .unwrap_or_else(|| (String::new(), String::new()));
+        fields.push(("QIMEI".into(), json!(q16)));
+        fields.push(("QIMEI36".into(), json!(q36)));
+        fields
+    }
+
+    /// The device session, obtained once a day.
+    ///
+    /// `music.getSession.session / GetSession` answers `{uid, sid, vkey}` for a
+    /// request that carries the device identity. This is the second half of what
+    /// the android interfaces want: a device that has logged in, not merely one
+    /// that is identifiable.
+    fn ensure_session(&self, credential: &Credential) -> Option<(String, String)> {
+        if let Some(session) = self.device.load_or_create().fresh_session() {
+            return Some(session);
+        }
+        let mut comm = serde_json::Map::new();
+        comm.insert("format".into(), json!("json"));
+        comm.insert("inCharset".into(), json!("utf-8"));
+        comm.insert("outCharset".into(), json!("utf-8"));
+        comm.insert("notice".into(), json!(0));
+        comm.insert(
+            "uin".into(),
+            json!(if credential.music_id.is_empty() { "0".to_string() } else { credential.music_id.clone() }),
+        );
+        comm.insert("g_tk".into(), json!(credential.g_tk()));
+        for (key, value) in Platform::Android.comm_overlay() {
+            comm.insert(key.into(), value);
+        }
+        for (key, value) in self.android_comm(credential) {
+            comm.insert(key, value);
+        }
+        let body = json!({
+            "comm": comm,
+            "req_0": {
+                "module": "music.getSession.session",
+                "method": "GetSession",
+                "param": { "uid": "", "vkey": 0, "caller": 0 },
+            },
+        });
+        let response = self
+            .post_json(credential, Class::Account, MUSICU_ENDPOINT, &body, &[])
+            .ok()?;
+        let session = response
+            .get("req_0")
+            .and_then(|slot| slot.get("data"))
+            .and_then(|data| data.get("session"))?;
+        let uid = session.get("uid").map(|value| match value {
+            serde_json::Value::String(text) => text.clone(),
+            other => other.to_string(),
+        })?;
+        let sid = session.get("sid").and_then(serde_json::Value::as_str)?.to_string();
+        let vkey = session
+            .get("vkey")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        self.device.apply_session(&uid, &sid, vkey);
+        Some((uid, sid))
     }
 
     fn post_json(
