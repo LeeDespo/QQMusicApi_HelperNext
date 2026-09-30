@@ -43,6 +43,7 @@ pub mod credential;
 pub mod models;
 
 pub use guard::{BreakerState, Class};
+pub use upstream::Platform;
 pub use credential::CredentialStore;
 pub use upstream::{Upstream, UpstreamError};
 pub use methods::{COMPONENT_VERSION, PROTOCOL_VERSION};
@@ -58,6 +59,10 @@ pub struct Configuration {
     /// Directory the credential is kept in. The host passes its own platform
     /// location: macOS/iOS an application-support folder, Android `filesDir`.
     pub data_dir: String,
+    /// Which platform profile calls are sent under unless a call says otherwise.
+    /// Most interfaces want [`Platform::Web`]; a host that needs the other one
+    /// for a particular interface can ask per call.
+    pub default_platform: Platform,
 }
 
 static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
@@ -136,10 +141,13 @@ mod tests {
     fn the_first_configuration_wins() {
         configure(Configuration {
             data_dir: "/tmp/helper-next-first".into(),
+            default_platform: Platform::Android,
         });
         configure(Configuration {
             data_dir: "/tmp/helper-next-second".into(),
+            default_platform: Platform::Web,
         });
         assert_eq!(data_directory().to_string_lossy(), "/tmp/helper-next-first");
+        assert_eq!(default_platform(), Platform::Android, "first call wins");
     }
 }

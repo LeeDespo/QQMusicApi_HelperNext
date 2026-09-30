@@ -47,6 +47,12 @@ fn main() {
     let data_dir = credential_directory();
     configure(Configuration {
         data_dir: data_dir.to_string_lossy().to_string(),
+        // The adapter reads a profile from the environment so a host that spawns
+        // it can pick one without the JSON growing a field on every call.
+        default_platform: std::env::var("QQMUSIC_HELPER_NEXT_PLATFORM")
+            .ok()
+            .and_then(|value| qqmusic_api_helper_next::Platform::parse(&value))
+            .unwrap_or_default(),
     });
     log(&format!(
         "version={} protocol={} data={}",

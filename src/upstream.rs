@@ -16,6 +16,61 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 const MUSICU_ENDPOINT: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
+
+/// The platform profile a request is sent under.
+///
+/// The upstream varies behaviour — and acceptance — by caller identity: the
+/// **web** profile (`cv 4747474 / ct 24 / platform yqq.json`) is what the account
+/// and catalogue endpoints want, while some interfaces are documented (and in
+/// QQMusicApi implemented) against the **android** profile
+/// (`ct 11 / cv 14090008`, which also carries device parameters). Nothing about
+/// the credential changes; only this block of the envelope does.
+///
+/// It is a per-call choice rather than a global one because the same component
+/// serves both kinds of call, and a host that needs the other profile for one
+/// interface must not have to rebuild for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Platform {
+    #[default]
+    Web,
+    Android,
+}
+
+impl Platform {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Platform::Web => "web",
+            Platform::Android => "android",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "web" | "yqq" | "yqq.json" => Some(Platform::Web),
+            "android" => Some(Platform::Android),
+            _ => None,
+        }
+    }
+
+    /// The `comm` fields this profile adds on top of the shared ones.
+    fn comm_overlay(self) -> Vec<(&'static str, serde_json::Value)> {
+        match self {
+            Platform::Web => vec![
+                ("cv", json!(4747474)),
+                ("ct", json!(24)),
+                ("platform", json!("yqq.json")),
+                ("needNewCode", json!(1)),
+            ],
+            Platform::Android => vec![
+                ("cv", json!(14090008)),
+                ("ct", json!(11)),
+                ("v", json!(14090008)),
+                ("platform", json!("yqq.json")),
+                ("needNewCode", json!(1)),
+            ],
+        }
+    }
+}
 const PROFILE_ASSETS_ENDPOINT: &str = "https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg";
 
 /// One `req_<n>` block.
@@ -62,14 +117,25 @@ impl Upstream {
         }
     }
 
-    /// Run one `req_0` call and return its `data` object.
+    /// Run one `req_0` call and return its `data` object, under the web profile.
     pub fn call(
         &self,
         credential: &Credential,
         class: Class,
         call: Call,
     ) -> Result<Value, UpstreamError> {
-        let envelope = self.envelope(credential, vec![call])?;
+        self.call_with(credential, class, Platform::Web, call)
+    }
+
+    /// Run one `req_0` call under an explicit platform profile.
+    pub fn call_with(
+        &self,
+        credential: &Credential,
+        class: Class,
+        platform: Platform,
+        call: Call,
+    ) -> Result<Value, UpstreamError> {
+        let envelope = self.envelope(credential, platform, vec![call])?;
         let response = self.post_json(credential, class, MUSICU_ENDPOINT, &envelope, &[])?;
         let slot = response
             .get("req_0")
@@ -108,21 +174,26 @@ impl Upstream {
             .ok_or_else(|| UpstreamError::Upstream("响应里没有 data".into()))
     }
 
-    fn envelope(&self, credential: &Credential, calls: Vec<Call>) -> Result<Value, UpstreamError> {
-        let mut body = json!({
-            "comm": {
-                "cv": 4747474,
-                "ct": 24,
-                "format": "json",
-                "inCharset": "utf-8",
-                "outCharset": "utf-8",
-                "notice": 0,
-                "platform": "yqq.json",
-                "needNewCode": 1,
-                "uin": if credential.music_id.is_empty() { "0".to_string() } else { credential.music_id.clone() },
-                "g_tk": credential.g_tk(),
-            }
-        });
+    fn envelope(
+        &self,
+        credential: &Credential,
+        platform: Platform,
+        calls: Vec<Call>,
+    ) -> Result<Value, UpstreamError> {
+        let mut comm = serde_json::Map::new();
+        comm.insert("format".into(), json!("json"));
+        comm.insert("inCharset".into(), json!("utf-8"));
+        comm.insert("outCharset".into(), json!("utf-8"));
+        comm.insert("notice".into(), json!(0));
+        comm.insert(
+            "uin".into(),
+            json!(if credential.music_id.is_empty() { "0".to_string() } else { credential.music_id.clone() }),
+        );
+        comm.insert("g_tk".into(), json!(credential.g_tk()));
+        for (key, value) in platform.comm_overlay() {
+            comm.insert(key.into(), value);
+        }
+        let mut body = json!({ "comm": comm });
         for (index, call) in calls.into_iter().enumerate() {
             body[format!("req_{index}")] = json!({
                 "module": call.module,

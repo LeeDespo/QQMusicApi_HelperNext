@@ -13,7 +13,7 @@
 
 use crate::credential::{credential_from_cookies, Credential};
 use crate::guard::Class;
-use crate::upstream::{first_array, first_int, first_object, first_text, Call, UpstreamError};
+use crate::upstream::{first_array, first_int, first_object, first_text, Call, Platform, UpstreamError};
 pub use crate::upstream::Upstream;
 use serde_json::{json, Value};
 
@@ -41,6 +41,17 @@ pub const METHODS: &[&str] = &[
 
 pub fn is_known(method: &str) -> bool {
     METHODS.contains(&method)
+}
+
+/// The platform profile this request asks for: `params.platform` when given
+/// (per-call choice), otherwise the host's configured default.
+///
+/// Exposed through the protocol rather than only through the typed API, so a
+/// host driving the component as a process can choose per call too.
+pub fn platform_for(params: &Value, default: Platform) -> Platform {
+    first_text(params, &["platform"])
+        .and_then(|value| Platform::parse(&value))
+        .unwrap_or(default)
 }
 
 /// Dispatch one method. `credential` is the account as currently stored.
