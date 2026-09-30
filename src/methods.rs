@@ -477,7 +477,18 @@ fn require_login(credential: &Credential) -> Result<(), UpstreamError> {
 /// accessor takes alternatives — the same approach the Python helper's
 /// `_track_payload` used.
 pub fn decoded_tracks(data: &Value) -> Vec<Value> {
-    let items = first_array(data, &["songlist", "songs", "list"]).cloned().unwrap_or_default();
+    // Candidate key spellings matter more than they look: the same list of
+    // tracks arrives as `songlist` (我喜歡), `songList` (an artist's songs, an
+    // album's tracks), `tracks` (the recommendation feed) and `songInfoList`
+    // (a ranking). A missing spelling drops every row silently — which is
+    // exactly what happened once, and why real responses get dumped rather than
+    // modelled from memory.
+    let items = first_array(
+        data,
+        &["songlist", "songList", "songs", "list", "tracks", "songInfoList"],
+    )
+    .cloned()
+    .unwrap_or_default();
     items.iter().filter_map(decode_track).collect()
 }
 

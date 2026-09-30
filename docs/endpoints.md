@@ -39,6 +39,62 @@
 ① 响应键名（本组件用候选键取值，可能全都落空）② 平台档案 ③ 参数里被上游视为必需而我漏掉的字段。
 `docs/parsing.md` 里"字段名在不同接口里不同"那条是同一类问题的记录。
 
+## 2026-09-30 第二轮实测：又修好三条，剩下三条各有明确原因
+
+修掉一组**键名拼写**后（这正是 `docs/parsing.md` 第 5 条警告的那类问题），这几条通过：
+
+| 能力 | 实测 |
+|---|---|
+| `fetch_album_tracks` | ✅ 3 条，`songList` 是键名（不是 `songlist`） |
+| `fetch_artist_songs` | ✅ 30 首，首条「晴天」 |
+| `fetch_artist_albums` | ✅ 30 张，latest 生效（我是如此相信 2019-12-15） |
+| `fetch_toplist_categories` | ✅ 4 组，首组「巅峰榜」含 6 个榜单（组内键名是 `toplist`，小写 l） |
+| `fetch_song_detail` | ✅（简介 176 字） |
+| `fetch_radio_stations` / `fetch_new_songs` | ✅ |
+| `resolve_song_url` | ✅ 拿到 128k 的可播地址 |
+
+**歌手专辑那条教学价值最高**：`albumID`（大写 ID）是上游的拼写，我按 `albumId` 取 → 每一项都拿不到 id →
+整表被 `filter_map` 静默丢掉，返回 0 张。**候选键少一个拼写 = 静默空表**，这就是为什么本项目的规矩是
+"先 dump 真实响应，再写解析"。
+
+剩下三条**不再是"不知道哪里错了"，而是各有明确成因**：
+
+### 1. 歌词：payload 是 3DES 加密的，不是 base64 明文
+
+```
+GetPlayLyricInfo {songMID, crypt:0, qrc:1}
+→ crypt 字段回 0，但 `lyric` 解 base64 后是二进制（0f be 82 d3 …），不是文本
+→ `lt_lyric` 为空；`lrc_t` / `qrc_t` / `trans_t` 是**时间戳**（名字里的 t 是 time，不是 text）
+```
+
+`docs/parsing.md` 里"歌词四个字段是 base64"这句**只对一半**：它们是 base64 包着**密文**。
+QQMusicApi 的 `algorithms/tripledes.py` 有密钥与算法（Python 版就是靠它解出歌词的）。
+**修法**：把那个 3DES 解密移植过来（约 100 行，或用 `des`/`tripledes` crate + 同一把密钥）；
+在这之前，本组件的 `fetch_lyric` 返回的是不可用内容，**不要拿它当歌词用**。
+
+### 2. 猜你喜欢：`code=1000`、`tracks` 空 —— 与搜索同因（缺设备标识）
+
+```
+get_radio_track {id:99,num:5,from:0,scene:0,song_ids:[]} → code 1000, tracks: []
+```
+web 与 android 档案都一样。Python 版能取到（应用主页的精选卡片就是它），差别在于库的客户端会先
+**获取并携带 qimei 设备参数**（见 `utils/device.py`：它向上游要 qimei/qimei36 并缓存）。
+所以这一条与**搜索**是同一个工作项：**实现设备标识**。
+
+### 3. 歌手资料：换接口
+
+```
+music.musichallSinger.SingerInfoInter / GetSingerDetail
+  {"singer_mids":[mid], …} → code 10006
+  {"singerMid": mid}       → code 104400，singer_list 为空
+```
+库里的 `get_info()`（歌手主页头部，名字/封面/统计）走的是**另一个接口**：
+
+```
+music.UnifiedHomepage.UnifiedHomepageSrv / GetHomepageHeader   {"SingerMid": mid}
+```
+**修法**：资料用这个接口；简介（wiki）另行确认，`GetSingerDetail` 需要补齐它真正要求的参数。
+
 ## 状态
 
 | 能力 | 方法名 | 上游 module / method | 参数要点 | 状态 |

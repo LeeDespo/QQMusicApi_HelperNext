@@ -281,7 +281,8 @@ pub fn artist_albums(
         .iter()
         .filter_map(|item| {
             let mid = first_text(item, &["albumMid", "albumMid", "mid"]);
-            let id = first_int(item, &["albumId", "id"])?;
+            // `albumID` with a capital ID is the upstream's own spelling here.
+            let id = first_int(item, &["albumID", "albumId", "id"])?;
             Some(json!({
                 "id": id,
                 "title": first_text(item, &["albumName", "name", "title"]).unwrap_or_default(),
@@ -385,7 +386,8 @@ pub fn toplist_categories(
         .iter()
         .filter_map(|group| {
             let title = first_text(group, &["title", "groupName", "name"]).unwrap_or_default();
-            let toplists: Vec<Value> = first_array(group, &["topList", "list", "topLists"])
+            // The group's own key is `toplist`, lower-case l.
+            let toplists: Vec<Value> = first_array(group, &["toplist", "topList", "list", "topLists"])
                 .cloned()
                 .unwrap_or_default()
                 .iter()
