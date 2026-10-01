@@ -535,6 +535,7 @@ pub fn aria2_configure(
     max_concurrent_downloads: i64,
     min_split_size_mib: i64,
     max_overall_download_limit_kib: i64,
+    port: i64,
 ) -> Result<crate::models::Aria2Status, HelperError> {
     call(
         "aria2_configure",
@@ -544,6 +545,7 @@ pub fn aria2_configure(
             "maxConcurrentDownloads": max_concurrent_downloads,
             "minSplitSizeMiB": min_split_size_mib,
             "maxOverallDownloadLimitKiB": max_overall_download_limit_kib,
+            "port": port,
         }),
     )
 }

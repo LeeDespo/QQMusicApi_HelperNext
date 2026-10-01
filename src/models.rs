@@ -62,6 +62,8 @@ pub struct Aria2OptionsModel {
     pub max_concurrent_downloads: i64,
     pub min_split_size_mib: i64,
     pub max_overall_download_limit_kib: i64,
+    /// The RPC port. Applied when the engine next starts.
+    pub port: i64,
 }
 
 /// One queued file: the gid from `aria2_add`, or its live state from `aria2_tell`.

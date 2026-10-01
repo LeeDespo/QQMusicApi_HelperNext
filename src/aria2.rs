@@ -43,6 +43,10 @@ pub struct Aria2Options {
     pub min_split_size_mib: u32,
     /// `--max-overall-download-limit`, in KiB/s; 0 means no limit.
     pub max_overall_download_limit_kib: u32,
+    /// The loopback port the RPC listens on. Not something a running aria2 can
+    /// change — a listener cannot move — so a new port applies the next time the
+    /// engine starts (重启引擎, or the next download once it has stopped).
+    pub port: u16,
 }
 
 impl Default for Aria2Options {
@@ -55,6 +59,7 @@ impl Default for Aria2Options {
             max_concurrent_downloads: 1,
             min_split_size_mib: 1,
             max_overall_download_limit_kib: 0,
+            port: DEFAULT_PORT,
         }
     }
 }
@@ -72,6 +77,9 @@ impl Aria2Options {
             max_concurrent_downloads: self.max_concurrent_downloads.clamp(1, 10),
             min_split_size_mib: self.min_split_size_mib.clamp(1, 1024),
             max_overall_download_limit_kib: self.max_overall_download_limit_kib.min(1_048_576),
+            // Below 1024 needs root and collides with system services; above is
+            // the user's business.
+            port: self.port.clamp(1024, 65_535),
         }
     }
 
@@ -159,6 +167,8 @@ impl Aria2 {
         let options = options.sanitised();
         *self.options.lock().expect("aria2 options") = options.clone();
         if let Some(running) = self.running.lock().expect("aria2").as_ref() {
+            // The port is deliberately not pushed: a listening socket cannot move,
+            // so the new value applies the next time the engine starts.
             let _ = self.call_on(running, "aria2.changeGlobalOption", json!([options.to_rpc()]));
         }
     }
@@ -190,11 +200,15 @@ impl Aria2 {
             )));
         }
         let secret = session_secret();
-        // A leftover instance (the component was killed, not stopped) may still
-        // hold the default port. Taking whichever port is free means a stale
-        // process cannot stop this one from starting; it also keeps a second
-        // component instance from fighting the first over one number.
-        let port = free_port().unwrap_or(DEFAULT_PORT);
+        // The user's port when it is free, otherwise whichever one is: a leftover
+        // instance (the component was killed, not stopped) must not stop this one
+        // from starting, and the port reported back is the one in use.
+        let preferred = self.options().port;
+        let port = if std::net::TcpListener::bind(("127.0.0.1", preferred)).is_ok() {
+            preferred
+        } else {
+            free_port(preferred).unwrap_or(preferred)
+        };
         let download_dir = self.directory.join("Downloads");
         std::fs::create_dir_all(&download_dir)
             .map_err(|error| UpstreamError::Upstream(format!("创建下载目录失败：{error}")))?;
@@ -516,10 +530,10 @@ fn text_of(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-/// A loopback port nothing is listening on, preferring the default.
-fn free_port() -> Option<u16> {
-    if std::net::TcpListener::bind(("127.0.0.1", DEFAULT_PORT)).is_ok() {
-        return Some(DEFAULT_PORT);
+/// A loopback port nothing is listening on, preferring the user's.
+fn free_port(preferred: u16) -> Option<u16> {
+    if std::net::TcpListener::bind(("127.0.0.1", preferred)).is_ok() {
+        return Some(preferred);
     }
     // Any port will do; ask the OS for one.
     std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -548,6 +562,7 @@ fn options_to_json(options: &Aria2Options) -> Value {
         "maxConcurrentDownloads": options.max_concurrent_downloads,
         "minSplitSizeMiB": options.min_split_size_mib,
         "maxOverallDownloadLimitKiB": options.max_overall_download_limit_kib,
+        "port": options.port,
     })
 }
 
@@ -576,6 +591,7 @@ pub fn options_from_params(params: &Value) -> Aria2Options {
             "maxOverallDownloadLimitKiB",
             defaults.max_overall_download_limit_kib,
         ),
+        port: int("port", u32::from(defaults.port)) as u16,
     }
     .sanitised()
 }
@@ -597,6 +613,7 @@ mod tests {
             max_concurrent_downloads: 0,
             min_split_size_mib: 0,
             max_overall_download_limit_kib: 999_999_999,
+            port: 80,
         }
         .sanitised();
         assert_eq!(wild.split, 1);
@@ -604,6 +621,7 @@ mod tests {
         assert_eq!(wild.max_concurrent_downloads, 1);
         assert_eq!(wild.min_split_size_mib, 1);
         assert_eq!(wild.max_overall_download_limit_kib, 1_048_576);
+        assert_eq!(wild.port, 1024, "a privileged port is not the user's to take");
     }
 
     #[test]
@@ -614,6 +632,7 @@ mod tests {
             max_concurrent_downloads: 3,
             min_split_size_mib: 2,
             max_overall_download_limit_kib: 0,
+            port: 16_900,
         };
         let payload = options.to_rpc();
         assert_eq!(payload["split"], "4");
