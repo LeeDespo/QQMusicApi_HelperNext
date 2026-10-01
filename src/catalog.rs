@@ -1189,13 +1189,35 @@ pub fn set_liked(
     credential: &Credential,
     platform: Platform,
     song_id: i64,
+    song_mid: Option<&str>,
     song_type: i64,
     liked: bool,
 ) -> Result<Value, UpstreamError> {
     require_login(credential)?;
-    if song_id <= 0 {
-        return Err(UpstreamError::Upstream("需要 songId（数字）".into()));
-    }
+    // The host knows a track by its mid — that is what every list row and the
+    // player carry — while this endpoint addresses songs by their *numeric* id.
+    // Resolving it here rather than at each call site is what keeps every like
+    // button in the app working from the same one-line call.
+    let song_id = if song_id > 0 {
+        song_id
+    } else if let Some(mid) = song_mid.filter(|mid| !mid.trim().is_empty()) {
+        let detail = song_detail(
+            upstream,
+            credential,
+            platform,
+            SongDetailQuery {
+                song_mid: Some(mid),
+                ..Default::default()
+            },
+        )?;
+        detail
+            .get("songId")
+            .and_then(Value::as_i64)
+            .filter(|id| *id > 0)
+            .ok_or_else(|| UpstreamError::Upstream(format!("找不到这首歌的数字 id：{mid}")))?
+    } else {
+        return Err(UpstreamError::Upstream("需要 songId 或 songMid".into()));
+    };
     upstream.call_with(
         credential,
         crate::Class::Write,

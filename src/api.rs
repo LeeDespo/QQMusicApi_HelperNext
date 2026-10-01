@@ -395,10 +395,10 @@ pub fn call_with_platform(
 
 /// Add to, or remove from, "我喜欢". The only write this component performs.
 #[export]
-pub fn set_liked(song_id: i64, song_type: i64, liked: bool) -> Result<(), HelperError> {
+pub fn set_liked(song_mid: String, song_type: i64, liked: bool) -> Result<(), HelperError> {
     let _: Value = call(
         "set_liked",
-        json!({ "songId": song_id, "songType": song_type, "liked": liked }),
+        json!({ "songMid": song_mid, "songType": song_type, "liked": liked }),
     )?;
     Ok(())
 }

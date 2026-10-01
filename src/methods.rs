@@ -310,6 +310,9 @@ fn catalog_dispatch(
             credential,
             platform,
             int("songId").unwrap_or(0),
+            // The host sends the mid; `songId` is accepted too, for callers that
+            // already have the number.
+            first_text(params, &["songMid", "mid"]).as_deref(),
             int("songType").unwrap_or(0),
             params.get("liked").and_then(Value::as_bool).unwrap_or(true),
         )
