@@ -107,6 +107,16 @@ pub struct Aria2Task {
     pub error: String,
 }
 
+/// A page of tracks, with the list's own size when the endpoint reports it.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackPage {
+    pub tracks: Vec<Track>,
+    /// `None` when the endpoint reports no total, which is not the same as zero.
+    pub total: Option<i64>,
+}
+
 /// One credited singer of a track.
 #[data]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

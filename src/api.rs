@@ -239,7 +239,7 @@ pub fn album_tracks(
     album_id: Option<i64>,
     offset: i64,
     limit: i64,
-) -> Result<Vec<crate::models::Track>, HelperError> {
+) -> Result<crate::models::TrackPage, HelperError> {
     call(
         "fetch_album_tracks",
         json!({ "albumMid": album_mid, "albumId": album_id, "offset": offset, "limit": limit }),

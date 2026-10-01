@@ -420,7 +420,7 @@ pub fn album_tracks(
     album_id: Option<i64>,
     offset: i64,
     limit: i64,
-) -> Result<Vec<Value>, UpstreamError> {
+) -> Result<(Vec<Value>, Option<i64>), UpstreamError> {
     let mut param = serde_json::Map::new();
     match (album_mid, album_id) {
         (Some(mid), _) if !mid.trim().is_empty() => {
@@ -444,7 +444,10 @@ pub fn album_tracks(
             param: Value::Object(param),
         },
     )?;
-    Ok(crate::methods::decoded_tracks(&data))
+    // The response reports the album's size, so a caller can page through it and
+    // can tell whether "select all" means all of it.
+    let total = first_int(&data, &["totalNum", "total"]);
+    Ok((crate::methods::decoded_tracks(&data), total))
 }
 
 // MARK: - An artist's works

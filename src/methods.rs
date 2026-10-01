@@ -160,7 +160,7 @@ fn catalog_dispatch(
             int("offset").unwrap_or(0),
             round(int("limit"), 200, 1, 200),
         )
-        .map(|tracks| json!({ "tracks": tracks })),
+        .map(|(tracks, total)| json!({ "tracks": tracks, "total": total })),
         "fetch_artist_songs" => crate::catalog::artist_songs(
             upstream,
             credential,

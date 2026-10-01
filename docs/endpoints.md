@@ -44,14 +44,14 @@
 | 专辑详情 | `fetch_album_detail` | `music.musichallAlbum.AlbumInfoServer` / `GetAlbumDetail` | `albumMId` 或 `albumId`；也可只给名字 | — |
 | 歌手资料 | `fetch_artist_detail` | `music.UnifiedHomepage.UnifiedHomepageSrv` / `GetHomepageHeader` | `SingerMid`；也可只给名字 | 空壳资料报错，不伪装成「未知歌手」 |
 | 歌手简介 | `fetch_artist_biography` | 同上 | 同上 | 回答在 `artistDetail` |
-| 专辑曲目 | `fetch_album_tracks` | `music.musichallAlbum.AlbumSongList` / `GetAlbumSongList` | `albumMid` 或 `albumId`, `begin`, `num` | 列表键是 `songList`（大写 L） |
+| 专辑曲目 | `fetch_album_tracks` | `music.musichallAlbum.AlbumSongList` / `GetAlbumSongList` | `albumMid` 或 `albumId`, `begin`, `num` | 列表键是 `songList`（大写 L），总数在 `totalNum` |
 | 歌手歌曲 | `fetch_artist_songs` | `musichall.song_list_server` / `GetSingerSongList` | `singerMid, order=1, number, begin` | 「最新」由组件按 `time_public` 排序 |
 | 歌手专辑 | `fetch_artist_albums` | `music.musichallAlbum.AlbumListServer` / `GetAlbumList` | 同上 | `albumID`（大写 ID）是上游的拼写 |
 | 电台分组 | `fetch_radio_stations` | `pf.radiosvr` / `GetRadiolist` | `uin` | — |
 | 电台曲目 | `fetch_radio_tracks` | `pf.radiosvr` / `GetRadiosonglist` | `id`, `num`, `firstPlay` | 电台是无穷列表 |
 | 新歌 | `fetch_new_songs` | `newsong.NewSongServer` / `get_new_song_info` | `type`（地区）, `num`, `start` | — |
 | 猜你喜欢 | `fetch_recommend_feed` | `music.radioProxy.MbTrackRadioSvr` / `get_radio_track` | `id=99, num, from, scene` | 需要设备会话 |
-| 歌词 | `fetch_lyric` | 明文 fcgi | `songmid`, `nobase64=1` | 逐字（`qrc`）只有加密路有，这里回空 |
+| 歌词 | `fetch_lyric` | 明文 fcgi | `songmid`, `nobase64=1` | `lyric` + `trans`，都是明文 LRC |
 | 取流地址 | `resolve_song_url` | `music.vkey.GetVkey` / `UrlGetVkey` | `songmid`, `filename`, `guid` | 按音质阶梯探测；**必须 android 档案** |
 | 收藏 / 取消收藏 | `set_liked` | `music.musicasset.PlaylistDetailWrite` / `AddSonglist`·`DelSonglist` | `songMid`（组件解析数字 id）或 `songId`，`liked` | 唯一的写操作 |
 | 搜索（四类） | `search_songs` / `search_artists` / `search_albums` / `search_playlists` | `music.search.SearchCgiService` / `DoSearchForQQMusicMobile` | `keyword, num_per_page, page_num, search_type` 0/1/2/3 | 结果在 `body.item_*`，总数 `meta.sum`；标题带 `<em>`，组件剥掉 |
@@ -74,7 +74,7 @@
 
 ## 四、当前限制
 
-- **逐字歌词**（`qrc`）未实现：只有加密的 `musicu.fcg` 路带它，明文 fcgi 路没有，组件选择不移植那套 3DES。
-- **专辑曲目**不报总数，所以宿主无法对它做「全选」。
+- **歌词没有逐字（`qrc`）时间数据**：明文 fcgi 路只回 `lyric`/`trans`，带 `qrc` 的只有加密的
+  `musicu.fcg` 路，组件选择不移植那套 3DES。宿主自己的歌词渲染按行时间戳做动画，不依赖这个字段。
 - **微信扫码登录**未实现：QQ 扫码与网页 cookie 两条路径可用。
 - **歌手简介多数为空**：上游本身对很多歌手没有这篇文字，空即答案。
