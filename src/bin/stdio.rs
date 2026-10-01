@@ -62,6 +62,12 @@ fn main() {
     ));
 
     let upstream = Arc::new(Upstream::new());
+    // The host may go away without closing stdin (a crash, a SIGKILL, a force
+    // quit). Without this the component — and the download engine it started —
+    // would outlive the app that owns them, which shows up as "the app is still
+    // running in the background".
+    watch_parent(Arc::clone(&upstream));
+
     let stdin = std::io::stdin();
     let mut workers = Vec::new();
 
@@ -94,6 +100,29 @@ fn main() {
     // it. Leaving a daemon behind would be a surprise the second time the app is
     // launched — the port would be held by a process nobody owns.
     upstream.aria2.shutdown();
+}
+
+/// Exit when the process that started this component does.
+///
+/// stdin closing is the orderly signal and is handled by the main loop; this
+/// covers the other ways a host disappears. A child is reparented to `launchd`
+/// (pid 1) when its parent dies, so a change of parent *is* the signal.
+fn watch_parent(upstream: Arc<Upstream>) {
+    let original = unsafe { libc::getppid() };
+    if original <= 1 {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let current = unsafe { libc::getppid() };
+        if current != original {
+            log(&format!(
+                "host exited (ppid {original} -> {current}); stopping"
+            ));
+            upstream.aria2.shutdown();
+            std::process::exit(0);
+        }
+    });
 }
 
 fn serve(upstream: &Upstream, request: &Value) -> Value {

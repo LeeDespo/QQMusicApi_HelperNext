@@ -25,6 +25,8 @@ serde_json = "1"
 # QRC word-level lyrics arrive zlib-compressed; this is the pure-Rust inflate
 # (no C), which keeps the "one static binary, no toolchain" property intact.
 miniz_oxide = "0.9"
+# `getppid`, for exiting when the host that spawned this component goes away.
+libc = "0.2"
 # Blocking HTTP with rustls. The component answers one call at a time per host
 # thread, so an async runtime would buy nothing and would multiply the
 # dependency surface of something meant to be embedded in a phone app.
