@@ -1,313 +1,80 @@
 # 接口清单
 
-每个"能力"对应的上游请求形状，以及在本组件里的实现状态。
-每条都是**实测**出来的：接口形状来自 QQMusicApi 的源码（`modules/*.py` 的 `_build_cgi` / `_build_http` 调用），
-状态列以真账号跑通为准。
+组件对外暴露的每一个方法，以及它背后打的上游接口。**这一份是参考手册，不是开发记录**：
+状态列写的是当前实现，不记日期、不记排查过程；那些坑记在[解析要点](parsing.md)里。
 
-## 两个上游
+## 一、上游与请求信封
 
 | 上游 | 形状 | 用途 |
 |---|---|---|
-| `POST https://u.y.qq.com/cgi-bin/musicu.fcg` | `{comm:{…}, req_0:{module, method, param}}`，支持 `req_0..req_N` 批量 | 目录、账号列表、歌词、取流、登录 |
-| `GET https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg` | 表单式 query：`ct=20&cid=205360956&userid=<数字uin>&reqtype=<2=专辑,3=歌单>&sin=&ein=` | **只有它**能取账号自己的歌单与收藏专辑 |
+| `POST https://u.y.qq.com/cgi-bin/musicu.fcg` | `{comm:{…}, req_0:{module, method, param}}` | 目录、账号列表、取流、登录 |
+| `GET https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg` | 表单式 query，`userid` 用数字 uin，`reqtype` 2=专辑 3=歌单 | 账号自己的歌单与收藏专辑（**只有它**能取） |
+| `GET https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg` | 表单式 query，`nobase64=1` | 明文歌词 |
+| `ssl.ptlogin2.qq.com` · `graph.qq.com` | 扫码登录的五步握手 | 登录 |
 
-`comm` 的平台档案必须用 **web**：`cv 4747474 / ct 24 / platform "yqq.json" / needNewCode 1`，
-外加 `uin` 与 `g_tk = hash33(qm_keyst)`；授权靠 Cookie（`uin`、`qm_keyst`）。
-用库默认档案请求账号列表会被拒（`10004`）。
+**`comm` 的平台档案按接口分类选择**，选错不报错、只回空数据：
 
-## 实测状态（2026-09-30，真账号）
+- **web 档案** —— 账号列表（我喜欢 / 我的歌单 / 收藏专辑 / 关注歌手）、曲库详情、榜单、电台、新歌。
+  用库默认档案请求账号列表会被拒（`10004`）。
+- **android 档案** —— 搜索、取流、收藏（写）、推荐流、歌手资料、封面匹配。
+  这些接口要**设备身份**与**设备会话**，两者都在 android 那套 `comm` 里。
 
-实现落地后逐条跑过一遍，如实记录——**通过**的可以直接用，**待修**的已经知道要查什么：
+## 二、方法清单
 
-| 能力 | 第一次实测 | 结论 |
-|---|---|---|
-| `fetch_song_detail` | ✅ 不遗憾 / 简介 176 字 | 通过（web 档案即可） |
-| `fetch_radio_stations` | ✅ 11 组，首组「猜你喜欢」 | 通过 |
-| `fetch_new_songs` | ✅ 57 首，首条「回响」 | 通过 |
-| `resolve_song_url` | ✅ playable=true，quality=128，拿到 CDN 地址 | 音质阶梯与文件名构造正确 |
-| `fetch_album_tracks` | ❌ 0 条 | 响应键名或参数待修：先 dump 原始响应比对 |
-| `fetch_artist_songs` / `fetch_artist_albums` | ❌ 0 条 | 同上（同一参数的 Python 实现能取到，说明是键名/参数细节） |
-| `fetch_toplist_categories` | ❌ 0 组 | 同上（`GetAll` 的分组键名待确认） |
-| `fetch_lyric` | ❌ 空 | 四个 base64 字段一个都没解出来 → 键名或 `qrc/crypt` 组合待确认 |
-| `fetch_recommend_feed` | ❌ 0 首 | `get_radio_track` 的参数/响应键待确认 |
-| `fetch_artist_detail` | ❌ `10006` | 参数形状不对（`singer_mids` 的写法或需换 `GetSingerDetail` 之外的接口） |
-| `search_*`（四类） | 未实现 | web 与 android 两个档案都试过：`code 0` 但 `meta.sum = 0`，是**查询形状**问题（很可能缺真实 qimei 等设备参数），不是档案问题 |
-| `set_liked` / 扫码登录 | 未实现 | 形状已在下方列出 |
+除非另有说明，每条都在真实账号上跑通过。
 
-**排查方法（下一步直接照做）**：同一个调用用 Python 版 helper 跑一遍并把原始响应落盘，
-与本组件的响应逐键对比——两者的 module/method/参数一致，差别只可能在
-① 响应键名（本组件用候选键取值，可能全都落空）② 平台档案 ③ 参数里被上游视为必需而我漏掉的字段。
-`docs/parsing.md` 里"字段名在不同接口里不同"那条是同一类问题的记录。
-
-## 2026-09-30 第二轮实测：又修好三条，剩下三条各有明确原因
-
-修掉一组**键名拼写**后（这正是 `docs/parsing.md` 第 5 条警告的那类问题），这几条通过：
-
-| 能力 | 实测 |
-|---|---|
-| `fetch_album_tracks` | ✅ 3 条，`songList` 是键名（不是 `songlist`） |
-| `fetch_artist_songs` | ✅ 30 首，首条「晴天」 |
-| `fetch_artist_albums` | ✅ 30 张，latest 生效（我是如此相信 2019-12-15） |
-| `fetch_toplist_categories` | ✅ 4 组，首组「巅峰榜」含 6 个榜单（组内键名是 `toplist`，小写 l） |
-| `fetch_song_detail` | ✅（简介 176 字） |
-| `fetch_radio_stations` / `fetch_new_songs` | ✅ |
-| `resolve_song_url` | ✅ 拿到 128k 的可播地址 |
-
-**歌手专辑那条教学价值最高**：`albumID`（大写 ID）是上游的拼写，我按 `albumId` 取 → 每一项都拿不到 id →
-整表被 `filter_map` 静默丢掉，返回 0 张。**候选键少一个拼写 = 静默空表**，这就是为什么本项目的规矩是
-"先 dump 真实响应，再写解析"。
-
-剩下三条**不再是"不知道哪里错了"，而是各有明确成因**：
-
-### 1. 歌词 ✅ 已解决——换一条**明文**路走（不必移植 3DES）
-
-```
-GetPlayLyricInfo {songMID, crypt:0, qrc:1}
-→ crypt 字段回 0，但 `lyric` 解 base64 后是二进制（0f be 82 d3 …），不是文本
-→ `lt_lyric` 为空；`lrc_t` / `qrc_t` / `trans_t` 是**时间戳**（名字里的 t 是 time，不是 text）
-```
-
-`musicu.fcg` 那条路的 payload 确实是密文（`crypt` 回 0 但内容是二进制，`lrc_t`/`qrc_t`/`trans_t` 是时间戳），
-**但没必要去移植那个自定义 3DES**：老的 fcgi 路直接给明文——
-
-```
-GET https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg
-    ?songmid=<mid>&g_tk=<hash33(musickey)>&format=json&inCharset=utf8&outCharset=utf-8
-    &nobase64=1&platform=yqq.json&needNewCode=1
-→ {"lyric": "[ti:不遗憾]\n[ar:李荣浩]…", "trans": "…"}
-```
-实测：1684 字符可读 LRC（`nobase64=1` 是明文的关键）。本组件现在就走这条。
-**代价**：**逐字（qrc）时间只有加密那条路有**，所以 `wordLyric` 目前回空——
-要逐字就得回来移植那个 3DES，这一条写在这里备查。
-
-### 2. 猜你喜欢：`code=1000`、`tracks` 空 —— 与搜索同因（缺设备标识）
-
-```
-get_radio_track {id:99,num:5,from:0,scene:0,song_ids:[]} → code 1000, tracks: []
-```
-web 与 android 档案都一样。Python 版能取到（应用主页的精选卡片就是它），差别在于库的客户端会先
-**获取并携带 qimei 设备参数**（见 `utils/device.py`：它向上游要 qimei/qimei36 并缓存）。
-所以这一条与**搜索**是同一个工作项：**实现设备标识**。
-
-### 3. 歌手资料：接口换对了，但上游回空壳 —— 与搜索/推荐/写操作同因
-
-```
-music.musichallSinger.SingerInfoInter / GetSingerDetail
-  {"singer_mids":[mid], …} → code 10006
-  {"singerMid": mid}       → code 104400，singer_list 为空
-
-music.UnifiedHomepage.UnifiedHomepageSrv / GetHomepageHeader  {"SingerMid": mid}
-  → code 10000，Info.Singer 每个字段都是空串（Name/SingerMid 都空），
-    只有 Info.FansNum / FollowNum / IP 有值
-```
-库里的 `get_info()` 走的就是后者，参数与我发的一样，所以**不是参数问题**：
-它与搜索、猜你喜欢是同一类——**缺设备标识**（见 `docs/parsing.md` 第 11 条）。
-本组件现在把这种"空壳"直接报成错误，而不是渲染成「未知歌手」。
-
-### 4. 收藏（写）：`code 1000` —— 原因大概率是**凭据陈旧**，不是缺参数
-
-```
-music.musicasset.PlaylistDetailWrite / AddSonglist
-  {"dirId":201,"tid":0,"bFmtUtf8":true,"v_songInfo":[{"songId":…,"songType":0/1}]}  → code 1000
-  省略 tid、dirId 用字符串、换 android 档案 …                                             全部 code 1000
-```
-**关键对照实验（2026-09-30）**：让 **Python 版自己**执行同一个收藏写，它直接报
-
-```
-{"ok": false, "error": "CredentialExpiredError: 登录凭证已过期, 请重新登录"}
-```
-
-也就是**读接口用同一份凭据完全正常，写接口被拒**——库在写之前会 `check_expired`。
-本组件拿到的是上游码 `code 1000`，几乎肯定就是同一件事：**这份测试凭据对写操作已失效**。
-所以结论不是"写接口缺了某个参数"，而是"**写需要一次新登录**"。
-
-诚实的现状：`set_liked` 已实现（形状与库一致），但**未验证成功过**；它应当在**扫码登录成功之后**
-重新测。在此之前文档与 README 都按"未验证"对待它。
-
-**设备标识已实现**（`src/device.rs`：RSA+AES+MD5 的完整握手，实测拿到 q16/q36，设备持久化，
-密码学有 NIST/已知摘要的单测）。它**修好了歌手资料**（配合 android 档案与 comm 里的 `qq`/`authst`），
-但**没有**修好搜索、猜你喜欢与收藏写——即使用真实 qimei 直连也一样失败。
-
-**下一个嫌疑是设备"会话"**：库的 android 公共参数里还带 `uid`/`sid`
-（`device.session_uid` / `session_sid` / `session_vkey`，由一次单独的登录步骤写入）。
-详见 `docs/parsing.md` 第 11 条。
-
-### 5. 扫码登录：✅ 前两步已通（根因是 `hash33` 的种子）
-
-```
-start_login  GET ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&…       ✅ 真 PNG + Set-Cookie: qrsig
-poll_login   GET ssl.ptlogin2.qq.com/ptqrlogin?ptqrtoken=<hash33(qrsig, 0)>  ✅ {"event":"SCAN"}
-```
-
-**根因**：`ptqrtoken` 用的是 `hash33(qrsig)`，而库里的 `hash33(s, h=0)` **默认种子是 0**；
-`g_tk` 那处才是显式传 `5381`。我先前两处都用 5381，于是轮询一路 403——
-**403 是"参数错"的表现，而不是"权限不足"**。种子 0 → HTTP 200 + `ptuiCB('66',…)`；
-种子 5381 → 403。这条已作为组件的一条通用规则写进 `docs/parsing.md`。
-
-排查过程中排除掉的因素（都试过，都不是原因）：Referer、Origin、浏览器 UA、账号 cookie、
-`Accept`/`Accept-Language`、cookie jar、HTTP/1.1 与 2、curl 作为对照客户端。
-
-**仍未验证**：扫码成功之后的 `check_sig` → `graph.qq.com/oauth2.0/authorize` → `QQLogin`
-三步（代码已按库实现写好，只有在有人真的扫码时才会执行）。请扫一次码验证，或等我在下一轮
-用一次真实扫码走完整条链。
-
-### 搜索：为什么它需要 android 档案 + 设备会话
-
-```
-music.search.SearchCgiService / DoSearchForQQMusicMobile
-{"searchid": <19 位>, "query": kw, "search_type": 0|1|2|3, "num_per_page": n,
- "page_num": p, "highlight": false, "grp": true, "selectors": {}, "vec_selectors": []}
-→ 结果在 body.item_song / body.singer / body.item_album / body.item_songlist，总数在 meta.sum
-```
-歌单/歌手/专辑标题里会带 `<em>` 高亮标记（即使 `highlight: false`），组件统一剥掉。
-实测（关键词「周杰伦」）：歌曲 999 条、歌手 209 位、专辑 527 张、歌单 300 个。
-
-## 状态## 状态
-
-| 能力 | 方法名 | 上游 module / method | 参数要点 | 状态 |
+| 能力 | 方法 | 上游 module / method | 参数要点 | 关键回值 |
 |---|---|---|---|---|
-| 组件信息 | `get_helper_info` | — | — | ✅ |
-| 登录状态 | `get_login_status` | `music.UserInfo.userInfoServer` / `GetLoginUserInfo` | `{}` | ✅ 昵称在 `info.nick` |
-| 导入登录（网页 cookie） | `import_cookies` | — | `uin` + `qm_keyst` 即可 | ✅ |
-| 退出登录 | `logout` | — | — | ✅ |
-| 我喜欢 | `fetch_liked_songs` | `music.srfDissInfo.DissInfo` / `CgiGetDiss` | `disstid=0, dirid=201, song_begin, song_num, tag, userinfo, orderlist` | ✅ 总数在 `dirinfo.songnum` |
-| 歌单/排行榜曲目 | `fetch_playlist_tracks` | 同上 | `disstid=<id>` + `song_begin/song_num` | ✅ 同上 |
-| 我的歌单 | `fetch_user_playlists` | 老 fcgi | `reqtype=3` | ✅ 保留目录（无 `dissid`）跳过 |
-| 收藏专辑 | `fetch_liked_albums` | 老 fcgi | `reqtype=2` | ✅ `pubtime` 是时间戳 |
-| 关注的歌手 | `fetch_followed_artists` | `music.concern.RelationList` / `GetFollowSingerList` | `HostUin=<encrypt_uin>, From, Size` | ✅ 返回键是 `List`（大写） |
-| 限流/熔断状态 | `get_status` | — | — | ✅ |
-| 专辑曲目 | `fetch_album_tracks` | `music.musichallAlbum.AlbumSongList` / `GetAlbumSongList` | `albumMid`, `begin`, `num`, `order` | ⏳ |
-| 歌手歌曲 | `fetch_artist_songs` | `musichall.song_list_server` / `GetSingerSongList` | `singerMid, order=1, number, begin` | ⏳ "最新"需本地按 `time_public` 排序 |
-| 歌手专辑 | `fetch_artist_albums` | `music.musichallAlbum.AlbumListServer` / `GetAlbumList` | `singerMid, order=1, number, begin` | ⏳ 同上 |
-| 歌手资料/简介 | `fetch_artist_detail` | `music.musichallSinger.SingerInfoInter` / `GetSingerDetail` | `singer_mids, ex_singer, wiki_singer, …` | ⏳ |
-| 排行榜分组 | `fetch_toplist_categories` | `music.musicToplist.Toplist` / `GetAll` | `{}` | ⏳ |
-| 排行榜曲目 | `fetch_toplist_tracks` | `music.musicToplist.Toplist` / `GetDetail` | `topId, offset, num` | ⏳ 曲目在 `songInfoList`，总数 `totalNum` |
-| 新歌 | `fetch_new_songs` | `newalbum.NewAlbumServer` / `get_new_album_info` | `area, num, start` | ⏳ |
-| 搜索（歌曲/歌手/专辑/歌单） | `search_songs` / `search_artists` / `search_albums` / `search_playlists` | `client.search.search_by_type`（`SearchType` 0/1/2/3） | `keyword, num, page, highlight=false` | ⏳ 四类共用一个端点 |
-| 猜你喜欢 | `fetch_recommend_feed` | 库 `recommend.get_guess_recommend` | — | ⏳ |
-| 歌曲简介 | `fetch_song_detail` | `music.pf_song_detail_svr` / `get_song_detail_yqq` | `song_mid` | ⏳ 文本在 `info.intro.content[].value` |
-| 专辑简介 | `fetch_album_detail` | `music.musichallAlbum.AlbumInfoServer` / `GetAlbumDetail` | `albumMid` | ⏳ |
-| 歌词 | `fetch_lyric` | `music.musichallSong.PlayLyricInfo` / `GetPlayLyricInfo` | `songMID, songID=0, format=json, crypt=0, qrc=0, trans, roma` | ⏳ 逐字在 `qrc` 的 base64 里 |
-| 取流地址 | `resolve_song_url` | `music.vkey.GetVkey` / `GetCdnDispatch` 等 | `songMid, mediaMid, 各档文件名 M500/M800/F000/C400` | ⏳ 需按音质阶梯探测并判读 per-file result 码 |
-| 电台分组 / 曲目 | `fetch_radio_*` | 库 `radio` 模块 | — | ⏳ |
-| 收藏 / 取消收藏（唯一的写） | `set_liked` | `music.musicasset.PlaylistBaseWrite` / `AddSonglist`·`DelSonglist` | `dirid=201`, `songIds/v_songIds` | ⏳ |
-| 扫码登录 | `start_login` / `poll_login` | `music.login.LoginServer` / `CreateQRCode` + `Login` | `tmeAppID=qqmusic`；轮询用 `musicid, qrCodeID, token` | ⏳ 另有 QQ Connect 与微信两条路径 |
+| 组件信息 | `get_helper_info` | — | — | `helperVersion` / `protocolVersion` / `methods` |
+| 限流与熔断状态 | `get_status` | — | — | `status.rateLimit.config` / `status.breakerConfig` |
+| 限流配置 | `set_rate_limit` | — | `enabled, windowSeconds, maxRequests` | clamp 到 1–3600 秒 / 1–100000 次 |
+| 熔断配置 | `set_breaker` | — | `enabled, failureThreshold, failureWindowSeconds, openSeconds` | 改配置会同时清空熔断状态 |
+| 登录状态 | `get_login_status` | `music.UserInfo.userInfoServer` / `GetLoginUserInfo` | `{}` | 昵称在 `info.nick` |
+| 导入登录 | `import_cookies` | — | `uin` + `qm_keyst` 即可 | 不需要别的 cookie |
+| 退出登录 | `logout` | — | — | 删除凭据文件 |
+| 扫码登录 | `start_login` / `poll_login` | `ssl.ptlogin2.qq.com` 五步握手 | `loginType` / `identifier` | `qrcode.imageBase64` / `event` |
+| 我喜欢 | `fetch_liked_songs` | `music.srfDissInfo.DissInfo` / `CgiGetDiss` | `dirid=201, song_begin, song_num` | 曲目在 `songlist`，总数在 `dirinfo.songnum` |
+| 歌单 / 排行榜曲目 | `fetch_playlist_tracks` | 同上 | `disstid=<id>` + `page` 或 `offset`，`song_num` | 同上 |
+| 排行榜分组 | `fetch_toplist_categories` | `music.musicToplist.Toplist` / `GetAll` | `{}` | 组内键名是 `toplist`（小写 l） |
+| 排行榜曲目 | `fetch_toplist_tracks` | `music.musicToplist.Toplist` / `GetDetail` | `topId, offset, num` | 曲目在 `songInfoList`，总数 `totalNum` |
+| 我的歌单 | `fetch_user_playlists` | 老 fcgi | `reqtype=3` | 无 `dissid` 的保留目录要跳过 |
+| 收藏专辑 | `fetch_liked_albums` | 老 fcgi | `reqtype=2` | `pubtime` 是北京时间零点 |
+| 关注的歌手 | `fetch_followed_artists` | `music.concern.RelationList` / `GetFollowSingerList` | `HostUin`（数字 uin 或 `encrypt_uin`）, `From`, `Size` | 列表键是 `List`（大写） |
+| 歌曲详情 / 简介 | `fetch_song_detail` | `music.pf_song_detail_svr` / `get_song_detail_yqq` | `song_mid`；只给名字时组件先搜索解析 | 简介在 `info.intro.content[].value`，**空即答案** |
+| 专辑详情 | `fetch_album_detail` | `music.musichallAlbum.AlbumInfoServer` / `GetAlbumDetail` | `albumMId` 或 `albumId`；也可只给名字 | — |
+| 歌手资料 | `fetch_artist_detail` | `music.UnifiedHomepage.UnifiedHomepageSrv` / `GetHomepageHeader` | `SingerMid`；也可只给名字 | 空壳资料报错，不伪装成「未知歌手」 |
+| 歌手简介 | `fetch_artist_biography` | 同上 | 同上 | 回答在 `artistDetail` |
+| 专辑曲目 | `fetch_album_tracks` | `music.musichallAlbum.AlbumSongList` / `GetAlbumSongList` | `albumMid` 或 `albumId`, `begin`, `num` | 列表键是 `songList`（大写 L） |
+| 歌手歌曲 | `fetch_artist_songs` | `musichall.song_list_server` / `GetSingerSongList` | `singerMid, order=1, number, begin` | 「最新」由组件按 `time_public` 排序 |
+| 歌手专辑 | `fetch_artist_albums` | `music.musichallAlbum.AlbumListServer` / `GetAlbumList` | 同上 | `albumID`（大写 ID）是上游的拼写 |
+| 电台分组 | `fetch_radio_stations` | `pf.radiosvr` / `GetRadiolist` | `uin` | — |
+| 电台曲目 | `fetch_radio_tracks` | `pf.radiosvr` / `GetRadiosonglist` | `id`, `num`, `firstPlay` | 电台是无穷列表 |
+| 新歌 | `fetch_new_songs` | `newsong.NewSongServer` / `get_new_song_info` | `type`（地区）, `num`, `start` | — |
+| 猜你喜欢 | `fetch_recommend_feed` | `music.radioProxy.MbTrackRadioSvr` / `get_radio_track` | `id=99, num, from, scene` | 需要设备会话 |
+| 歌词 | `fetch_lyric` | 明文 fcgi | `songmid`, `nobase64=1` | 逐字（`qrc`）只有加密路有，这里回空 |
+| 取流地址 | `resolve_song_url` | `music.vkey.GetVkey` / `UrlGetVkey` | `songmid`, `filename`, `guid` | 按音质阶梯探测；**必须 android 档案** |
+| 收藏 / 取消收藏 | `set_liked` | `music.musicasset.PlaylistDetailWrite` / `AddSonglist`·`DelSonglist` | `songMid`（组件解析数字 id）或 `songId`，`liked` | 唯一的写操作 |
+| 搜索（四类） | `search_songs` / `search_artists` / `search_albums` / `search_playlists` | `music.search.SearchCgiService` / `DoSearchForQQMusicMobile` | `keyword, num_per_page, page_num, search_type` 0/1/2/3 | 结果在 `body.item_*`，总数 `meta.sum`；标题带 `<em>`，组件剥掉 |
+| 封面匹配（三件） | `search_track_artwork` / `search_artist_artwork` / `search_album_artwork` | 内部走搜索 | 名称字段 + `limit` | 候选 + 排名置信度 |
 
-> ⏳ 的条目形状已经确定（见上表与下面的"精确形状"），实现方式是同一套：`methods.rs` 里加一个分支 +
-> `api.rs` 里加一个 `#[export]` 包装 + 一条真账号的验证。`docs/parsing.md` 记着每类响应里那些不直观的地方。
+## 三、下载引擎（Aria2 Next）
 
-## 精确形状（已从 QQMusicApi 源码逐条核对，可直接照写）
+组件在 `<自身目录>/aria2-next` 找到引擎后按需拉起，用标准 JSON-RPC 驱动
+（回环端口、每次启动重新生成 `--rpc-secret`）。引擎缺席时这些方法报错，宿主应退回自己的下载方式。
 
-### 歌曲 / 专辑资料
+| 方法 | 作用 |
+|---|---|
+| `aria2_status` | 是否安装/运行、版本、**实际在用**的端口、当前速度、生效参数。`ensure=true` 会顺手拉起 |
+| `aria2_restart` | 停掉再拉起（换端口、清掉卡死任务用） |
+| `aria2_configure` | 分块数、单服务器连接数、并发任务数、最小分块、总限速、**端口**；除端口外立即生效 |
+| `aria2_add` | 排队一个文件：`url` + `out`（引擎目录内的文件名） |
+| `aria2_tell` | 单个任务的进度，按 `gid` |
+| `aria2_list` | 全部任务：`tellActive` + `tellWaiting` + `tellStopped` 合并 |
+| `aria2_pause` / `aria2_unpause` / `aria2_cancel` | 单个（给 `gid`）或全部（不给）。取消**同时删掉临时文件** |
 
-```
-fetch_song_detail   music.pf_song_detail_svr / get_song_detail_yqq   {"song_mid": mid}
-                    → info.intro.content[].value（多段用换行连接）；另有 info.company/genre/lan/pub_time
-fetch_album_detail  music.musichallAlbum.AlbumInfoServer / GetAlbumDetail
-                    {"albumId": <数字>} 或 {"albumMId": <mid>}（二选一，按传入的是数字还是 mid）
-fetch_album_tracks  music.musichallAlbum.AlbumSongList / GetAlbumSongList
-                    {"albumId": <数字>} 或 {"albumMid": <mid>} + {"begin": offset, "num": limit, "order": 0}
-```
+## 四、当前限制
 
-### 歌手
-
-```
-fetch_artist_songs   musichall.song_list_server / GetSingerSongList
-                     {"singerMid": mid, "order": 1, "number": num, "begin": (page-1)*num}
-                     "最新" 上游不支持排序 → 本地按每首的 album.time_public 倒序
-fetch_artist_albums  music.musichallAlbum.AlbumListServer / GetAlbumList
-                     同上参数；"最新" 同理按 album time_public 倒序
-fetch_artist_detail  music.musichallSinger.SingerInfoInter / GetSingerDetail
-                     {"singer_mids": [mid], "ex_singer": true, "wiki_singer": true,
-                      "group_singer": true, "pic": true, "photos": true}
-                     简介取 wiki/desc 字段；头像取 pic 相关字段
-```
-
-### 排行榜
-
-```
-fetch_toplist_categories  music.musicToplist.Toplist / GetAll       {}
-                          → data 里的分组（每组含 topList）与榜单条目（topId/topTitle/cover）
-fetch_toplist_tracks      music.musicToplist.Toplist / GetDetail
-                          {"topId": id, "offset": n, "num": m}[, {"withTags": true}]
-                          曲目在 songInfoList（不是 data.data.song），总数在 totalNum
-```
-
-### 电台 / 新歌 / 猜你喜欢
-
-```
-fetch_radio_stations  pf.radiosvr / GetRadiolist        {"uin": <数字uin 或 "0">}
-                      → radio_list[].list[]（分组）{id, title, pic_url}
-fetch_radio_tracks    pf.radiosvr / GetRadiosonglist
-                      {"id": stationId, "firstplay": 1|0, "num": limit}
-                      → 曲目在 data.track_list / songlist
-fetch_new_songs       newsong.NewSongServer / get_new_song_info   {"type": <地区码>}
-fetch_guess_recommend music.radioProxy.MbTrackRadioSvr / get_radio_track
-                      {"id": 99, "num": 5, "from": 0, "scene": 0, "song_ids": []}（需凭据）
-```
-
-### 歌词 / 取流
-
-```
-fetch_lyric      music.musichallSong.PlayLyricInfo / GetPlayLyricInfo
-                 {"songMID": mid, "songID": id?, "format": "json", "crypt": 0,
-                  "qrc": 1, "trans": 1, "roma": 1}
-                 lyric/trans/roma/qrc 都是 base64；逐字时间在 qrc 里
-resolve_song_url music.vkey.GetVkey / UrlGetVkey（加密档位时是 music.vkey.GetEVkey / CgiGetEVkey）
-                 {"uin": <数字uin>, "filename": [...], "guid": <随机>, "songmid": [...],
-                  "songtype": [...], "ctx": 0}
-                 文件名构造：有 media_mid 用 `<档位前缀><media_mid><后缀>`（M500.mp3 / M800.mp3 /
-                 F000.flac / C400.m4a），没有 media_mid 时用 `<前缀><mid><mid><后缀>`
-                 逐档探测并读 midurlinfo[].result（0 成功 / 104003 无权限 / 104004 取票失败 /
-                 104013 设备受限），返回第一个可用的 purl + vkey
-```
-
-### 搜索（四类共用）
-
-```
-search_songs / search_artists / search_albums / search_playlists
-music.search.SearchCgiService / DoSearchForQQMusicMobile
-{"searchid": <随机>, "query": keyword, "search_type": 0|1|2|3,
- "num_per_page": num, "page_num": page, "highlight": false, "grp": true,
- "selectors": {}, "vec_selectors": []}
-→ 结果在 body.item_song / body.singer / body.item_album / body.item_songlist；总数 meta.sum
-
-⚠ 这一条 QQMusicApi 明确用 **Platform.ANDROID**（ct 11 / cv 14090008，带 qimei 等设备参数），
-而本组件目前全局用 web 档案。实现搜索前要先给 `upstream.rs` 加"按调用选平台档案"的能力，
-并用真账号确认 web 档案是否也能过——**这是剩余工作里唯一的技术未知项**。
-```
-
-### 收藏 / 取消收藏（唯一的写）
-
-```
-set_liked  music.musicasset.PlaylistDetailWrite / AddSonglist（收藏）· DelSonglist（取消）
-           {"dirId": 201, "tid": 0, "bFmtUtf8": true,
-            "v_songInfo": [{"songId": <数字>, "songType": 0}]}
-           需要 songId（数字）；只给 songMid 时要先用 song.query_song 换 songId
-```
-
-### 扫码登录（多步）
-
-```
-start_login  music.login.LoginServer / CreateQRCode    {"tmeAppID": "qqmusic", <版本参数>}
-             → qrCodeID/token/二维码内容（另有 QQ Connect 与微信两条路径，各自走不同授权域名）
-poll_login   music.login.LoginServer / Login
-             {"musicid": <数字>, "qrCodeID": ..., "token": ...}
-             轮询事件：SCAN / CONF / DONE / TIMEOUT / REFUSE；DONE 时响应里带回凭据
-             → 等价于 import_credential(uin, qm_keyst)
-```
-
-### 后续实现顺序（建议）
-
-1. 资料类（歌曲/专辑简介、专辑曲目、歌手三项）—— web 档案，风险最低
-2. 列表类（榜单、电台、新歌、猜你喜欢）—— web 档案
-3. 歌词 + 取流 —— 需要 media_mid 与音质阶梯
-4. 搜索四类 —— **先解决平台档案**（见上）
-5. 收藏写（需要 songId 换算）+ 扫码登录（多步状态机）
-
-## 响应字段的解析入口
-
-曲目统一由 `methods::decode_track` 映射（`songId/songMid/mediaMid/title/artist/album/albumMid/albumId/
-imageURL/duration/payPlay/singerMid/singers`）。上游同一实体的键名在不同接口里不一样
-（`mid`/`songmid`/`albummid`、`singer` 有时是列表有时是字符串），取值工具在 `upstream.rs`：
-`first_text` / `first_int` / `first_object` / `first_array` 按候选键依次尝试。
+- **逐字歌词**（`qrc`）未实现：只有加密的 `musicu.fcg` 路带它，明文 fcgi 路没有，组件选择不移植那套 3DES。
+- **专辑曲目**不报总数，所以宿主无法对它做「全选」。
+- **微信扫码登录**未实现：QQ 扫码与网页 cookie 两条路径可用。
+- **歌手简介多数为空**：上游本身对很多歌手没有这篇文字，空即答案。

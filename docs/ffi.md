@@ -21,7 +21,7 @@ boltffi check                      # 检查工具链与 rustup target
 配置在仓库根的 `boltffi.toml`（`boltffi init` 生成，Apple 部署目标、模块名、Kotlin 包名等都在里面）。
 `dist/` 不进版本库。
 
-## 生成的 API 形状（实测生成结果）
+## 生成的 API 形状
 
 Rust 侧 `#[export] pub fn liked_songs(page: u32, limit: u32) -> Result<LikedSongs, HelperError>`
 在两端分别长成：
@@ -70,12 +70,12 @@ Task.detached { let liked = try likedSongs(page: 1, limit: 50) ; await MainActor
 viewModelScope.launch(Dispatchers.IO) { val liked = likedSongs(1u, 50u) }
 ```
 
-> 后续可以补 `async` 导出（BoltFFI 支持，Swift 得到 `async throws`、Kotlin 得到 suspend + `FfiException`），
-> 那需要给内核加一个小执行器；目前不做，因为同步 + 后台分派已经够用且没有额外依赖。
+> 也可以做成 `async` 导出（BoltFFI 支持，Swift 得到 `async throws`、Kotlin 得到 suspend + `FfiException`），
+> 那需要给内核加一个小执行器；同步 + 后台分派已经够用，所以不做。
 
-## 生成器的限制（踩到过）
+## 生成器的限制
 
-BoltFFI 编译不过"多语句 wire writer"的形状。实测：**元组向量** `Vec<(String, String)>` 会让
+BoltFFI 编译不过"多语句 wire writer"的形状：**元组向量** `Vec<(String, String)>` 会让
 `generate swift` 直接失败（`swift target cannot render multi-statement codec write`），
 `generate kotlin` 则跳过那个函数并打印
 
