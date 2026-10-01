@@ -926,13 +926,84 @@ pub fn recommend_feed(
 /// suggests, and porting that cipher is a liability when a plaintext route
 /// exists. The word-level (`qrc`) track is only available on the encrypted
 /// route, so `word_lyric` comes back empty — `docs/parsing.md` records this.
+/// What the encrypted lyric route answers with.
+///
+/// Both fields arrive as hex-encoded ciphertext of the same QRC cipher, which is
+/// why they are decrypted together here rather than by the caller.
+#[derive(Debug, Default)]
+pub struct EncryptedLyrics {
+    /// The word-level track as LRC (one timestamp per word).
+    pub word: Option<String>,
+    /// The translation, also as LRC.
+    pub translation: Option<String>,
+}
+
+/// Fetch the word-level lyrics and the translation.
+///
+/// Only the encrypted route has them: with `qrc:1` (and `crypt:1`) the `lyric`
+/// field stops being base64 LRC and becomes the QRC ciphertext, and `trans` is
+/// encrypted the same way. Neither being present is normal — plenty of songs have
+/// no word-level track and no translation — so a miss comes back as `None` rather
+/// than an error. A payload we *cannot read* is logged, because that means the
+/// envelope changed rather than that the song has nothing.
+pub fn encrypted_lyrics(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    song_mid: &str,
+) -> Result<EncryptedLyrics, UpstreamError> {
+    if song_mid.trim().is_empty() {
+        return Ok(EncryptedLyrics::default());
+    }
+    let data = upstream.call_with(
+        credential,
+        crate::Class::Playback,
+        platform,
+        Call {
+            module: "music.musichallSong.PlayLyricInfo",
+            method: "GetPlayLyricInfo",
+            param: json!({
+                "crypt": 1,
+                "lrc_t": 0,
+                "qrc": 1,
+                "qrc_t": 0,
+                "roma": 0,
+                "roma_t": 0,
+                "trans": 1,
+                "trans_t": 0,
+                "needSingingAnnotations": false,
+                "type": 1,
+                "songMid": song_mid,
+            }),
+        },
+    )?;
+
+    let decode = |field: &str, transform: fn(&str) -> Result<String, crate::qrc::QrcError>| {
+        let raw = first_text(&data, &[field]).filter(|value| !value.trim().is_empty())?;
+        match transform(&raw) {
+            Ok(text) if !text.trim().is_empty() => Some(text),
+            Ok(_) => None,
+            Err(error) => {
+                eprintln!("[qqmusic-helper-next] {field} 解析失败 songMid={song_mid}：{error}");
+                None
+            }
+        }
+    };
+
+    Ok(EncryptedLyrics {
+        word: decode("lyric", crate::qrc::word_level_lrc),
+        // The translation is an ordinary LRC once decrypted, so it only needs the
+        // cipher undone.
+        translation: decode("trans", |hex| crate::qrc::decrypt_hex(hex)),
+    })
+}
+
 pub fn lyric(
     upstream: &Upstream,
     credential: &Credential,
     _platform: Platform,
     song_mid: &str,
     _song_id: Option<i64>,
-    _with_word_timing: bool,
     with_translation: bool,
 ) -> Result<Value, UpstreamError> {
     if song_mid.trim().is_empty() {
@@ -949,11 +1020,12 @@ pub fn lyric(
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
     };
+    // Word-level lyrics are a separate read (`word_level_lyric`); this is the
+    // whole-line text and its translation, which is what the plaintext route has.
     Ok(json!({
         "lyric": text("lyric"),
         "translation": if with_translation { text("trans") } else { None },
         "romanization": Option::<String>::None,
-        "wordLyric": Option::<String>::None,
     }))
 }
 

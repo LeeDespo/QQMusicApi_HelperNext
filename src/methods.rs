@@ -224,16 +224,46 @@ fn catalog_dispatch(
         .map(|tracks| json!({ "tracks": tracks })),
         "fetch_recommend_feed" => crate::catalog::recommend_feed(upstream, credential, platform)
             .map(|tracks| json!({ "tracks": tracks })),
-        "fetch_lyric" => crate::catalog::lyric(
-            upstream,
-            credential,
-            platform,
-            &text("songMid"),
-            int("songId"),
-            params.get("wordTiming").and_then(Value::as_bool).unwrap_or(true),
-            params.get("translation").and_then(Value::as_bool).unwrap_or(true),
-        )
-        .map(|lyric| json!({ "lyric": lyric })),
+        "fetch_lyric" => {
+            // Two reads, because they come from different places: the whole-line
+            // LRC (and the translation) from the plaintext fcgi route, and the
+            // word-level track from the encrypted one, which carries neither
+            // translation nor a readable `lyric` field. Only the word-level read is
+            // skippable — it is the one that costs an extra round trip.
+            let want_words = params.get("wordTiming").and_then(Value::as_bool).unwrap_or(true);
+            let want_translation = params.get("translation").and_then(Value::as_bool).unwrap_or(true);
+            let song_mid = text("songMid");
+            let encrypted = if want_words || want_translation {
+                crate::catalog::encrypted_lyrics(upstream, credential, platform, &song_mid)
+            } else {
+                Ok(crate::catalog::EncryptedLyrics::default())
+            };
+            // The match arm's value is the `Result` itself, so the two reads are
+            // chained rather than unwrapped here.
+            encrypted.and_then(|encrypted| {
+                crate::catalog::lyric(
+                    upstream,
+                    credential,
+                    platform,
+                    &song_mid,
+                    int("songId"),
+                    want_translation,
+                )
+                .map(|mut plain| {
+                    // The encrypted route's translation is the one that actually
+                    // carries text; the plaintext route leaves it empty.
+                    if let Some(translation) = encrypted.translation {
+                        if let Some(object) = plain.as_object_mut() {
+                            object.insert("translation".into(), json!(translation));
+                        }
+                    }
+                    json!({
+                        "lyric": plain,
+                        "wordLyric": if want_words { encrypted.word } else { None },
+                    })
+                })
+            })
+        }
         // The local library's enrichment: cover candidates and biographies.
         "search_track_artwork" => crate::catalog::search_track_artwork(
             upstream,

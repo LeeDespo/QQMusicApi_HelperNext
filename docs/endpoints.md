@@ -51,13 +51,40 @@
 | 电台曲目 | `fetch_radio_tracks` | `pf.radiosvr` / `GetRadiosonglist` | `id`, `num`, `firstPlay` | 电台是无穷列表 |
 | 新歌 | `fetch_new_songs` | `newsong.NewSongServer` / `get_new_song_info` | `type`（地区）, `num`, `start` | — |
 | 猜你喜欢 | `fetch_recommend_feed` | `music.radioProxy.MbTrackRadioSvr` / `get_radio_track` | `id=99, num, from, scene` | 需要设备会话 |
-| 歌词 | `fetch_lyric` | 明文 fcgi | `songmid`, `nobase64=1` | `lyric` + `trans`，都是明文 LRC |
+| 歌词（整行） | `fetch_lyric` | 明文 fcgi | `songmid`, `nobase64=1` | `lyric` 是明文 LRC |
+| 歌词（逐字） | `fetch_lyric` 的 `wordLyric` | `music.musichallSong.PlayLyricInfo` / `GetPlayLyricInfo` | `crypt:1, qrc:1, trans:1, songMid` | `lyric`/`trans` 都变成本文 §五 的密文 |
 | 取流地址 | `resolve_song_url` | `music.vkey.GetVkey` / `UrlGetVkey` | `songmid`, `filename`, `guid` | 按音质阶梯探测；**必须 android 档案** |
 | 收藏 / 取消收藏 | `set_liked` | `music.musicasset.PlaylistDetailWrite` / `AddSonglist`·`DelSonglist` | `songMid`（组件解析数字 id）或 `songId`，`liked` | 唯一的写操作 |
 | 搜索（四类） | `search_songs` / `search_artists` / `search_albums` / `search_playlists` | `music.search.SearchCgiService` / `DoSearchForQQMusicMobile` | `keyword, num_per_page, page_num, search_type` 0/1/2/3 | 结果在 `body.item_*`，总数 `meta.sum`；标题带 `<em>`，组件剥掉 |
 | 封面匹配（三件） | `search_track_artwork` / `search_artist_artwork` / `search_album_artwork` | 内部走搜索 | 名称字段 + `limit` | 候选 + 排名置信度 |
 
-## 三、下载引擎（Aria2 Next）
+## 三、逐字歌词（QRC）
+
+QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1, qrc:1` 时，
+`lyric` 字段不再是 base64 的 LRC，而是 **hex 编码的密文**；`trans`（翻译）同样是密文。
+明文 fcgi 路只有整行歌词，拿不到逐字——这就是过去没有逐字时间的原因。
+
+组件内部三步，互相独立：
+
+1. **解密**（`src/qrc.rs`）——QQ 自己的「类 DES」（S/P/E 盒与密钥位序都是它私有的，不是标准 DES），
+   三重组合 `D(K3) → E(K2) → D(K1)`，解密后是带 UTF-8 BOM 的 zlib，解压得到 QRC 文档。
+   规格移植自 MIT 的 [qrc-decoder](https://github.com/apoint123/qrc-decoder)。
+2. **取内容**——解出来的是一层 XML 壳，真正的歌词在一个属性（或 CDATA）里，实体转义过。
+3. **转格式**——QRC 文本是 `[行开始,行时长]词(词开始,词时长)…`；
+   组件把它转成 **LRC，但每个词前都带一个时间戳**：
+
+   ```
+   [00:00.00]五[00:00.43]百[00:01.13]英[00:01.65]里
+   ```
+
+   选这个形状是因为宿主的歌词读取器**一行的多个时间戳就当作多个词**，并据此生成逐字 TTML——
+   宿主不必为逐字做任何特殊处理。
+
+`fetch_lyric` 因此回答两个字段：`lyric`（整行，明文路，兜底用）与 `wordLyric`（逐字，有则给）。
+**没有逐字不是错误**：老歌往往就没有，那时 `wordLyric` 为 `null`，宿主用 `lyric` 就好。
+翻译优先取加密路解出来的那份（明文路的 `trans` 常常是空的）。
+
+## 四、下载引擎（Aria2 Next）
 
 组件在 `<自身目录>/aria2-next` 找到引擎后按需拉起，用标准 JSON-RPC 驱动
 （回环端口、每次启动重新生成 `--rpc-secret`）。引擎缺席时这些方法报错，宿主应退回自己的下载方式。
@@ -72,9 +99,7 @@
 | `aria2_list` | 全部任务：`tellActive` + `tellWaiting` + `tellStopped` 合并 |
 | `aria2_pause` / `aria2_unpause` / `aria2_cancel` | 单个（给 `gid`）或全部（不给）。取消**同时删掉临时文件** |
 
-## 四、当前限制
+## 五、当前限制
 
-- **歌词没有逐字（`qrc`）时间数据**：明文 fcgi 路只回 `lyric`/`trans`，带 `qrc` 的只有加密的
-  `musicu.fcg` 路，组件选择不移植那套 3DES。宿主自己的歌词渲染按行时间戳做动画，不依赖这个字段。
 - **微信扫码登录**未实现：QQ 扫码与网页 cookie 两条路径可用。
 - **歌手简介多数为空**：上游本身对很多歌手没有这篇文字，空即答案。

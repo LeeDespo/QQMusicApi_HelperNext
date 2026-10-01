@@ -735,6 +735,7 @@ dependencies = [
  "cbc",
  "cipher",
  "md5",
+ "miniz_oxide",
  "rand",
  "rsa",
  "serde",

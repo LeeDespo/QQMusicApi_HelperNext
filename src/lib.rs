@@ -37,6 +37,7 @@
 
 mod aria2;
 mod catalog;
+pub mod qrc;
 pub mod device;
 mod guard;
 pub mod login;
@@ -164,5 +165,24 @@ mod tests {
         });
         assert_eq!(data_directory().to_string_lossy(), "/tmp/helper-next-first");
         assert_eq!(default_platform(), Platform::Android, "first call wins");
+    }
+}
+
+
+#[cfg(test)]
+mod qrc_vector_check {
+    #[test]
+    fn the_official_vector_decrypts_to_the_expected_document() {
+        let hex = include_str!("qrc_vector_tmp.hex").trim();
+        let document = crate::qrc::decrypt_hex(hex).expect("decrypts");
+        // JS `.length` counts UTF-16 units; Rust counts bytes. CJK makes them differ.
+        assert_eq!(document.chars().count(), 7188, "length the reference records");
+        assert!(document.contains("<QrcInfos>"));
+        assert!(document.contains("<LyricInfo LyricCount=\"1\">"));
+        let payload = crate::qrc::extract_payload(&document).expect("payload");
+        let lines = crate::qrc::parse(&payload);
+        assert!(!lines.is_empty(), "words were found");
+        let lrc = crate::qrc::to_word_lrc(&lines);
+        println!("---\n{l}\n---", l = &lrc[..lrc.len().min(400)]);
     }
 }
