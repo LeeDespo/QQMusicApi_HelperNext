@@ -18,6 +18,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 const MUSICU_ENDPOINT: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
+/// The signed twin of `musicu.fcg`. Same envelope, but the URL carries a `zzc`
+/// signature over the exact body sent (see [`Upstream::call_signed`]).
+const MUSICS_ENDPOINT: &str = "https://u.y.qq.com/cgi-bin/musics.fcg";
 
 /// The platform profile a request is sent under.
 ///
@@ -227,6 +230,59 @@ impl Upstream {
         call: Call,
     ) -> Result<Value, UpstreamError> {
         self.call_with(credential, class, Platform::Web, call)
+    }
+
+    /// Run one `req_0` call on the **signed** `musics.fcg` route.
+    ///
+    /// The reference library's `sign=True` endpoints (乐谱、不喜欢列表) live on
+    /// this route: the same `{comm, req_0}` envelope, but the URL carries a
+    /// `zzc` signature over the exact bytes sent — the server answers `2000`
+    /// (需要签名) when it does not verify, which is how a missing or wrong
+    /// signature shows up. `params` are extra URL query parameters the endpoint
+    /// wants alongside the signature.
+    ///
+    /// The signed endpoints put their business status inside `data`
+    /// (`Retcode`); a non-zero outer code with a non-empty `data` is still the
+    /// endpoint answering (an empty 乐谱 answers `10007`), so only an empty
+    /// slot is treated as an error here.
+    pub fn call_signed(
+        &self,
+        credential: &Credential,
+        class: Class,
+        platform: Platform,
+        call: Call,
+        params: &[(&str, String)],
+    ) -> Result<Value, UpstreamError> {
+        let envelope = self.envelope(credential, platform, vec![call])?;
+        // The signature must cover the bytes actually sent, so the body is
+        // serialized once here and posted verbatim.
+        let body = serde_json::to_string(&envelope)
+            .map_err(|error| UpstreamError::Upstream(error.to_string()))?;
+        let mut query: Vec<(String, String)> = vec![
+            ("_".into(), now_millis().to_string()),
+            ("sign".into(), crate::port::signed::zzc_sign(body.as_bytes())),
+        ];
+        query.extend(
+            params
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), value.clone())),
+        );
+        let url = format!("{MUSICS_ENDPOINT}?{}", encode_query(&query));
+        let response = self.post_raw(credential, class, &url, &body)?;
+        let slot = response
+            .get("req_0")
+            .ok_or_else(|| UpstreamError::Upstream("响应里没有 req_0".into()))?;
+        let code = slot.get("code").and_then(Value::as_i64).unwrap_or(0);
+        if let Some(reason) = refusal_reason(code) {
+            return Err(UpstreamError::Upstream(format!("上游返回错误（{code}）：{reason}")));
+        }
+        match slot.get("data") {
+            Some(Value::Object(data)) if !data.is_empty() => Ok(Value::Object(data.clone())),
+            _ => Err(UpstreamError::Upstream(format!(
+                "上游返回错误（{code}）：{}",
+                slot.get("msg").and_then(Value::as_str).unwrap_or("")
+            ))),
+        }
     }
 
     /// Run one `req_0` call under an explicit platform profile.
@@ -485,6 +541,48 @@ impl Upstream {
         }
     }
 
+    /// POST a body the caller serialized, verbatim.
+    ///
+    /// The signed route must sign the exact bytes it sends, so it cannot go
+    /// through `post_json`'s re-serialization.
+    fn post_raw(
+        &self,
+        credential: &Credential,
+        class: Class,
+        url: &str,
+        body: &str,
+    ) -> Result<Value, UpstreamError> {
+        if let Some(reason) = self.breaker.check() {
+            return Err(UpstreamError::Refused(reason));
+        }
+        self.limiter.acquire(class);
+
+        let mut request = self
+            .agent
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Referer", "https://y.qq.com/");
+        let cookies = credential.cookie_header();
+        if !cookies.is_empty() {
+            request = request.header("Cookie", &cookies);
+        }
+
+        match request.send(body) {
+            Ok(mut response) => {
+                let value: Value = response
+                    .body_mut()
+                    .read_json()
+                    .map_err(|error| UpstreamError::Transport(error.to_string()))?;
+                self.breaker.record_success();
+                Ok(value)
+            }
+            Err(error) => {
+                self.breaker.record_failure();
+                Err(UpstreamError::Transport(error.to_string()))
+            }
+        }
+    }
+
     fn get_json(
         &self,
         credential: &Credential,
@@ -528,6 +626,39 @@ fn refusal_reason(code: i64) -> Option<&'static str> {
         1000 | 104401 | 104400 => Some("登录已过期，请重新登录"),
         _ => None,
     }
+}
+
+/// Milliseconds since the Unix epoch, for the `_` anti-cache query parameter.
+fn now_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or(0)
+}
+
+/// Percent-encode a query the way a form body would be written.
+///
+/// The signed route's `_`/`sign` pair is the one place this component builds a
+/// query by hand, so this lives next to its caller.
+fn encode_query(params: &[(String, String)]) -> String {
+    params
+        .iter()
+        .map(|(key, value)| format!("{}={}", encode_component(key), encode_component(value)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn encode_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// Pick the first present key out of `keys`, as a string.

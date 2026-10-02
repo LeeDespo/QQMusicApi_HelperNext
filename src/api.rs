@@ -21,6 +21,14 @@ fn upstream() -> &'static Upstream {
     INSTANCE.get_or_init(Upstream::new)
 }
 
+/// The same shared upstream, for the port modules' typed wrappers.
+///
+/// The port layer adds protocol methods; it must not add a second HTTP agent,
+/// limiter or breaker, so its wrappers go through this one instance.
+pub(crate) fn shared_upstream() -> &'static Upstream {
+    upstream()
+}
+
 fn store() -> CredentialStore {
     CredentialStore::for_directory(&data_directory())
 }

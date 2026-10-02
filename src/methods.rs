@@ -83,7 +83,7 @@ pub const METHODS: &[&str] = &[
 ];
 
 pub fn is_known(method: &str) -> bool {
-    METHODS.contains(&method)
+    METHODS.contains(&method) || crate::port::is_known(method)
 }
 
 /// Payload for one method, returned as a JSON object the CLI hands straight back
@@ -402,16 +402,29 @@ pub fn dispatch(
     if let Some(result) = catalog_dispatch(upstream, &account, platform, method, params) {
         return result;
     }
+    // The ported reference endpoints, one domain file each (`src/port/`). Tried
+    // after the original table, so an existing method is never shadowed by a
+    // ported one.
+    if let Some(result) = crate::port::dispatch(upstream, &account, platform, method, params) {
+        return result;
+    }
     match method {
-        "get_helper_info" => Ok(json!({
-            "helper": {
-                "helperVersion": COMPONENT_VERSION,
-                "protocolVersion": PROTOCOL_VERSION,
-                "libraryVersion": LIBRARY_VERSION,
-                "credentialDir": true,
-                "methods": METHODS,
-            }
-        })),
+        "get_helper_info" => {
+            // The advertised method list is the union of the original table and
+            // the ported endpoints, so a host that enumerates what the component
+            // serves sees the whole surface.
+            let mut served: Vec<&str> = METHODS.to_vec();
+            served.extend(crate::port::all_methods());
+            Ok(json!({
+                "helper": {
+                    "helperVersion": COMPONENT_VERSION,
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "libraryVersion": LIBRARY_VERSION,
+                    "credentialDir": true,
+                    "methods": served,
+                }
+            }))
+        }
         "get_login_status" => Ok(json!({ "login": login_status(upstream, &account)? })),
         // Observability for the two polite mechanisms: "am I being throttled by
         // my own limiter, or is the upstream refusing me?" is otherwise

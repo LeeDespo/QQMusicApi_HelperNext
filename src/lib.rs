@@ -37,6 +37,7 @@
 
 mod aria2;
 mod catalog;
+pub mod port;
 pub mod qrc;
 pub mod device;
 mod guard;

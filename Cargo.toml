@@ -42,6 +42,8 @@ cbc = "0.1"
 cipher = { version = "0.4", features = ["alloc"] }
 rsa = { version = "0.9", features = ["pem"] }
 md5 = "0.7"
+# SHA-1, for the `zzc` signature the signed `musics.fcg` route wants.
+sha1 = "0.10"
 base64 = "0.22"
 rand = "0.8"
 
