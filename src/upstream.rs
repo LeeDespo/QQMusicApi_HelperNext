@@ -241,6 +241,11 @@ impl Upstream {
     /// signature shows up. `params` are extra URL query parameters the endpoint
     /// wants alongside the signature.
     ///
+    /// `comm_override` is the reference's `override_comm=True`: a few endpoints
+    /// want their own `comm` block instead of the account one (the sheet-music
+    /// reads ask as an anonymous `h5` caller, `uin ""` and `g_tk 5381`). Pass
+    /// `None` for the ordinary account envelope.
+    ///
     /// The signed endpoints put their business status inside `data`
     /// (`Retcode`); a non-zero outer code with a non-empty `data` is still the
     /// endpoint answering (an empty 乐谱 answers `10007`), so only an empty
@@ -252,8 +257,17 @@ impl Upstream {
         platform: Platform,
         call: Call,
         params: &[(&str, String)],
+        comm_override: Option<Value>,
     ) -> Result<Value, UpstreamError> {
-        let envelope = self.envelope(credential, platform, vec![call])?;
+        let mut envelope = match comm_override {
+            Some(comm) => json!({ "comm": comm }),
+            None => self.envelope(credential, platform, Vec::new())?,
+        };
+        envelope["req_0"] = json!({
+            "module": call.module,
+            "method": call.method,
+            "param": call.param,
+        });
         // The signature must cover the bytes actually sent, so the body is
         // serialized once here and posted verbatim.
         let body = serde_json::to_string(&envelope)

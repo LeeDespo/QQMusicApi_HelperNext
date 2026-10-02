@@ -21,9 +21,16 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO_ROOT/target/debug/qqmusic-helper-next"
+
+# 自己保证二进制是新的：只跑 cargo test 的调用方不会构建 bin 目标，
+# 用旧二进制冒烟会得到"明明移植了却说不支持"的假失败。
+if ! (cd "$REPO_ROOT" && cargo build --bin qqmusic-helper-next >/dev/null 2>&1); then
+  echo "SMOKE_RESULT {\"passed\":0,\"failed\":1,\"skipped\":0,\"failures\":[{\"method\":\"cargo build\",\"reason\":\"二进制构建失败\"}],\"checked\":[]}"
+  exit 1
+fi
 if [ ! -x "$BIN" ]; then
-  echo "SMOKE_RESULT {\"passed\":0,\"failed\":0,\"skipped\":0,\"failures\":[],\"checked\":[],\"error\":\"先 cargo build\"}"
-  exit 0
+  echo "SMOKE_RESULT {\"passed\":0,\"failed\":1,\"skipped\":0,\"failures\":[{\"method\":\"cargo build\",\"reason\":\"构建后仍找不到二进制\"}],\"checked\":[]}"
+  exit 1
 fi
 
 HELPER_DIR=""

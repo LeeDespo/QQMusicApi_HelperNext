@@ -50,6 +50,26 @@ pub fn zzc_sign(payload: &[u8]) -> String {
     format!("zzc{part_1}{cleaned}{part_2}").to_lowercase()
 }
 
+/// 参考实现里 `override_comm=True` 的那种 `comm`：以匿名 h5 调用方身份发请求
+/// （乐谱读取要的就是这个——`uin` 空、`g_tk` 是字面量 5381，不是账号的 g_tk）。
+///
+/// 放在这里而不是让每个领域自己拼：`g_tk` 用错不会有报错，只会得到空数据。
+pub fn anonymous_h5_comm(platform: Option<&str>) -> serde_json::Value {
+    let mut comm = serde_json::json!({
+        "g_tk": 5381,
+        "uin": "",
+        "format": "json",
+        "inCharset": "utf-8",
+        "outCharset": "utf-8",
+        "notice": 0,
+        "needNewCode": 1,
+    });
+    if let Some(platform) = platform {
+        comm["platform"] = serde_json::json!(platform);
+    }
+    comm
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,11 +129,42 @@ mod live_probes {
                     param: serde_json::json!({"Cmd": 3, "Page": 1}),
                 },
                 &[],
+                None,
             )
             .expect("签名路应当可用");
         println!(
             "signed route data keys: {:?}",
             data.as_object().map(|o| o.keys().collect::<Vec<_>>())
         );
+    }
+}
+
+#[cfg(test)]
+mod live_sheet_probe {
+    use crate::credential::CredentialStore;
+    use crate::upstream::{Call, Platform, Upstream};
+
+    /// 真机验证「自定义 comm + 签名」这条组合路（默认忽略）。
+    #[test]
+    #[ignore]
+    fn live_sheet_route() {
+        let store = CredentialStore::for_directory(&crate::data_directory());
+        let credential = store.load().expect("需要一份可用的凭据");
+        let upstream = Upstream::new();
+        let data = upstream
+            .call_signed(
+                &credential,
+                crate::Class::Read,
+                Platform::Web,
+                Call {
+                    module: "music.mir.SheetMusicSvr",
+                    method: "HasSheetMusic",
+                    param: serde_json::json!({"songMid": "003w2xz20QlUZt"}),
+                },
+                &[],
+                Some(super::anonymous_h5_comm(None)),
+            )
+            .expect("乐谱查询应当可用");
+        println!("sheet route data: {data}");
     }
 }
