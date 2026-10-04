@@ -19,6 +19,7 @@
 
 pub mod collection_write;
 pub mod comment;
+pub mod library_extra;
 pub mod login_extra;
 pub mod mv;
 pub mod recommend_extra;
@@ -40,6 +41,7 @@ pub fn all_methods() -> Vec<&'static str> {
     for module in [
         collection_write::METHODS,
         comment::METHODS,
+        library_extra::METHODS,
         login_extra::METHODS,
         mv::METHODS,
         recommend_extra::METHODS,
@@ -78,6 +80,7 @@ pub fn dispatch(
     }
     try_domain!(collection_write);
     try_domain!(comment);
+    try_domain!(library_extra);
     try_domain!(login_extra);
     try_domain!(mv);
     try_domain!(recommend_extra);
@@ -116,6 +119,11 @@ mod tests {
     /// 本层的领域文件，一处登记、三处使用（mod / all_methods / dispatch 由人工保证，
     /// 这里检查的是每个方法都有自己的包装与分发位置）。
     const DOMAIN_FILES: &[(&str, &[&str], &str)] = &[
+        (
+            "library_extra",
+            library_extra::METHODS,
+            include_str!("library_extra.rs"),
+        ),
         (
             "collection_write",
             collection_write::METHODS,

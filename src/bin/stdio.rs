@@ -134,12 +134,15 @@ fn serve(upstream: &Upstream, request: &Value) -> Value {
     // a credential in a log or a JSON line is a credential leaked.
     if method == "import_cookies" {
         return match methods::credential_from_params(&params) {
-            Ok(credential) => match CredentialStore::for_directory(&credential_directory())
-            .store(&credential)
-            {
-                Ok(()) => with_id(id, json!({ "login": { "loggedIn": true } })),
-                Err(error) => with_id(id, json!({ "ok": false, "error": format!("写入凭据失败：{error}") })),
-            },
+            Ok(credential) => {
+                match CredentialStore::for_directory(&credential_directory()).store(&credential) {
+                    Ok(()) => with_id(id, json!({ "login": { "loggedIn": true } })),
+                    Err(error) => with_id(
+                        id,
+                        json!({ "ok": false, "error": format!("写入凭据失败：{error}") }),
+                    ),
+                }
+            }
             Err(error) => with_id(id, json!({ "ok": false, "error": error.to_string() })),
         };
     }
@@ -152,31 +155,43 @@ fn serve(upstream: &Upstream, request: &Value) -> Value {
         return with_id(id, methods::configure_breaker(upstream, &params));
     }
     if method == "aria2_status" {
-        return with_id(id, match methods::aria2_status(upstream, &params) {
-            Ok(value) => value,
-            Err(error) => json!({ "ok": false, "error": error.to_string() }),
-        });
+        return with_id(
+            id,
+            match methods::aria2_status(upstream, &params) {
+                Ok(value) => value,
+                Err(error) => json!({ "ok": false, "error": error.to_string() }),
+            },
+        );
     }
     if method == "aria2_restart" {
-        return with_id(id, match methods::aria2_restart(upstream) {
-            Ok(value) => value,
-            Err(error) => json!({ "ok": false, "error": error.to_string() }),
-        });
+        return with_id(
+            id,
+            match methods::aria2_restart(upstream) {
+                Ok(value) => value,
+                Err(error) => json!({ "ok": false, "error": error.to_string() }),
+            },
+        );
     }
     if method == "aria2_configure" {
         return with_id(id, methods::aria2_configure(upstream, &params));
     }
     if method == "aria2_list" {
-        return with_id(id, match methods::aria2_list(upstream) {
-            Ok(value) => value,
-            Err(error) => json!({ "ok": false, "error": error.to_string() }),
-        });
+        return with_id(
+            id,
+            match methods::aria2_list(upstream) {
+                Ok(value) => value,
+                Err(error) => json!({ "ok": false, "error": error.to_string() }),
+            },
+        );
     }
     if method == "aria2_pause" || method == "aria2_unpause" || method == "aria2_cancel" {
-        return with_id(id, match methods::aria2_control(upstream, method, &params) {
-            Ok(value) => value,
-            Err(error) => json!({ "ok": false, "error": error.to_string() }),
-        });
+        return with_id(
+            id,
+            match methods::aria2_control(upstream, method, &params) {
+                Ok(value) => value,
+                Err(error) => json!({ "ok": false, "error": error.to_string() }),
+            },
+        );
     }
     if method == "aria2_add" || method == "aria2_tell" {
         let result = if method == "aria2_add" {
@@ -184,15 +199,16 @@ fn serve(upstream: &Upstream, request: &Value) -> Value {
         } else {
             methods::aria2_tell(upstream, &params)
         };
-        return with_id(id, match result {
-            Ok(value) => value,
-            Err(error) => json!({ "ok": false, "error": error.to_string() }),
-        });
+        return with_id(
+            id,
+            match result {
+                Ok(value) => value,
+                Err(error) => json!({ "ok": false, "error": error.to_string() }),
+            },
+        );
     }
     if method == "logout" {
-        let _ =
-            CredentialStore::for_directory(&credential_directory())
-            .clear();
+        let _ = CredentialStore::for_directory(&credential_directory()).clear();
         return with_id(id, json!({ "login": { "loggedIn": false } }));
     }
 
@@ -203,8 +219,7 @@ fn serve(upstream: &Upstream, request: &Value) -> Value {
         );
     }
 
-    let credential = CredentialStore::for_directory(&credential_directory())
-    .load();
+    let credential = CredentialStore::for_directory(&credential_directory()).load();
     let started = std::time::Instant::now();
     let result = methods::dispatch(upstream, credential.as_ref(), method, &params);
     log(&format!(
@@ -225,11 +240,36 @@ fn serve(upstream: &Upstream, request: &Value) -> Value {
 /// fifteen-second hang with nothing in the logs.)
 fn with_id(id: Value, mut value: Value) -> Value {
     if let Some(object) = value.as_object_mut() {
+        // Some methods return a resource ID (a playlist or a new comment).
+        // Preserve it before attaching the transport correlation ID, so the
+        // caller can address that resource for subsequent reads or cleanup.
+        if let Some(resource_id) = object.remove("id") {
+            object.insert("resultId".into(), resource_id);
+        }
         object.insert("id".into(), id);
         object.entry("ok").or_insert(json!(true));
         value
     } else {
         json!({ "id": id, "ok": true, "value": value })
+    }
+}
+
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+
+    #[test]
+    fn a_resource_id_survives_request_correlation() {
+        let reply = with_id(json!("request-42"), json!({"id": "comment-7"}));
+        assert_eq!(reply["id"], "request-42");
+        assert_eq!(reply["resultId"], "comment-7");
+        assert_eq!(reply["ok"], true);
+    }
+
+    #[test]
+    fn replies_without_resource_ids_keep_their_shape() {
+        let reply = with_id(json!(9), json!({"ok": false, "error": "rejected"}));
+        assert_eq!(reply, json!({"id": 9, "ok": false, "error": "rejected"}));
     }
 }
 

@@ -1,0 +1,152 @@
+{
+  "startedAt": "2026-10-04T15:14:13.517782+00:00",
+  "writes": [
+    {
+      "method": "create_playlist",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "add_playlist_songs",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "add_playlist_songs",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "remove_playlist_songs",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "remove_playlist_songs",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "add_comment",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "delete_comment",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "delete_playlist",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "fav_album",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "unfav_album",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "set_liked",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "set_liked",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "add_dislike",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "cancel_dislike",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "fav_playlist",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "unfav_playlist",
+      "status": "responded",
+      "error": null
+    }
+  ],
+  "groups": [
+    {
+      "name": "playlist create/add/deduplicate/remove/comment/delete",
+      "status": "passed"
+    },
+    {
+      "name": "album roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "liked song roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "dislike roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "external playlist favourite roundtrip",
+      "status": "passed"
+    }
+  ],
+  "restorations": [
+    {
+      "resource": "temporary comment",
+      "verified": true,
+      "evidence": "comment visible before delete, absent after delete; parent playlist also removed"
+    },
+    {
+      "resource": "temporary playlist and its songs",
+      "verified": true,
+      "evidence": "created playlist directory IDs equal baseline",
+      "responseError": null
+    },
+    {
+      "resource": "album favourites",
+      "verified": true
+    },
+    {
+      "resource": "liked songs",
+      "verified": true
+    },
+    {
+      "resource": "disliked songs",
+      "verified": true
+    },
+    {
+      "resource": "external playlist favourites",
+      "verified": true
+    }
+  ],
+  "excluded": [
+    "login/QR flows",
+    "clear_dislike_songs: existing dislike entries retain their original timestamps and order"
+  ],
+  "screenshots": 0,
+  "targets": {
+    "songId": 361947418,
+    "albumId": 28791467,
+    "externalPlaylistId": 7039749142
+  },
+  "temporaryPlaylist": {
+    "name": "HelperNext接口测试-20261004-151415",
+    "dirid": 2,
+    "id": 9788453982
+  },
+  "finishedAt": "2026-10-04T15:14:36.577428+00:00"
+}

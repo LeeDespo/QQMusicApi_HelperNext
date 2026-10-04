@@ -13,6 +13,16 @@
 用错档案不会报错：搜索会回 `meta.sum = 0`，取流会回 `104003`。所以"某个接口今天突然没数据了"
 先看档案，再看参数。
 
+移植层按端点的实测结论选档案，两处容易记反：
+
+- **必须 android，且是实测确定的**：歌手主页 Tab（`GetHomepageTabDetail`，web 档案回 `code 10000` + 空壳）、
+  歌手名称图像（`GetHomepageHeader` 且 comm 要盖 `cv/v = 20080000`）、
+  综合搜索 `do_search_v2`（web 档案直接回 `code 2001` 风控）、类型搜索 `DoSearchForQQMusicMobile`
+  （web 档案回空目录 `meta.sum = 0`）。前两者调用方显式给 `platform` 时尊重调用方；后两者缺省 Android
+  与既有 `search_songs` 一致。
+- **反过来，`GetSingerList` 在 android 档案下被拒**（`104403`），所以歌手列表跟随调用方档案
+  （组件默认 Web），不要按"歌手资料走 android"一刀切。
+
 ## 2. 我喜欢的曲目在 `songlist`，总数在 `dirinfo.songnum`
 
 `CgiGetDiss`（`dirid=201`，不给 `disstid`）返回 `dirinfo`（含 `title`/`songnum`）与 `songlist`。
@@ -133,9 +143,15 @@ ptqrtoken  = hash33(qrsig)              ← 默认种子 0
   否则会用空列表覆盖宿主缓存里的真数据。
 - **歌曲简介**里的空＝这首歌本来就没有简介＝**就是答案**，照常返回。
 
-同一条读取路径上挂着两种相反的规则，判据是"空是不是一种合法的正常状态"。
+同一条读取路径上挂着两种相反的规则，判据是"空是不是一种合法的正常状态"。移植层按同一条判据：
 
-## 13. 风控码 `2001` 要当成错误
+- **键不在＝故障**：收藏歌单/专辑/MV（`v_list`/`mvlist`）、关系列表（`List`）、好友（`Friends`）、
+  创建的歌单（`v_playlist`）、音乐基因的 `UserInfoCard`、歌手资料的空壳（连 `Name` 都没有）。
+- **键在而空＝答案**：评论四个列表、时刻评论、MV/歌曲关联的空映射与空列表、推荐流、
+  不喜欢列表（参考模型带 `default_factory=list`）、关系列表翻过末尾的空页。
+- **`10007`（没有曲谱）＝答案**，`80092`（歌已在/不在歌单）＝成功，见 §15。
+
+## 13b. 风控码 `2001` 要当成错误
 
 上游被限流时回的是一份"成功但空"的结果集（`code 2001`）。照单全收就会把"被限流"显示成
 "搜不到"。组件对 `2000/2001/1000/104401/104400` 一律报错，理由写在错误信息里。
@@ -146,3 +162,52 @@ ptqrtoken  = hash33(qrsig)              ← 默认种子 0
 （超限**等待**——每次调用都是用户看得见的读取，延迟比失败好），以及熔断（连续失败开路，
 半开只放一个探测）。两者都可从宿主配置（`set_rate_limit` / `set_breaker`），
 `get_status` 回显生效值。组件是独立进程，**退出即忘**，所以宿主每次拉起后都要重推。
+
+## 15. 签名路（`musics.fcg` 的 `zzc`）与 `musics.fcg` 不是同一条
+
+参考里标 `sign=True` 的端点走 `POST musics.fcg?sign=…`：信封、module/method、参数与
+`musicu.fcg` 完全相同，只是 URL 上多一个 `zzc`。**服务端按收到的字节校验**，签名对不上回
+`2000`——所以发送与签名必须用同一份字节，不能序列化两次。算法的两段固定下标与异或表照抄
+参考（`src/port/signed.rs`），自己发明等价物一定失败。
+
+签名路上有两种 comm：
+
+- **账号 comm**（不喜欢家族的读取）——组件默认那套，签名只是多一个 `zzc`；
+- **匿名 h5 comm**（`override_comm=True`，乐谱两件、虫虫钢琴档）——`uin` 空、`g_tk` 是
+  **字面量 5381**，不是账号的 `g_tk`。`g_tk` 用错不会报错，只会得到空数据。
+
+工作单要求乐谱两个端点都签名，但参考里只有虫虫钢琴那一档显式标了 `sign=True`
+（`song.py:236`），默认档与 `HasSheetMusic` 没标；签名只是 URL 多带 `zzc`，信封与参数不变。
+
+**`80092` / `10007` 这类"业务码不是错误"**：`call_with` 把它们收成错误，各领域自己还原。
+`10007`（没有曲谱）还原成空答案；`80092`（歌已在/不在歌单）按成功收下——后者是**从错误
+文案的括号里解析码**（`上游返回错误（80092）：…`），依赖 `upstream.rs` 的错误格式。
+
+## 16. 移植层里几个键名的陷阱
+
+- **评论回值的列表与分页字段在 `CommentList` 里，`Msg`/`SubCode`/`TotalCmNum` 在它的兄弟上**；
+  计数的 `count` 系列在 `response` 里，`cmTabType` 也在兄弟上。按一套形状找齐会两边都丢。
+- **`fetch_hot_comments` 的 `PageNum` 是 `page - 1`**（第一页传 0），照参考；这不是笔误。
+- **`GetOtherVersionSongs` 只认 `songmid`/`songid`，不认 `mids`/`ids`**（真机核实）。
+  参考 module 层的 `value: int|str` 就是二选一，web 适配器里的合并写法没搬过来。
+- **MV 地址的 `newFileType`/`fileSize` 是驼峰**，而 MV 详情的上传者字段在上游实际是
+  snake_case（`uploader_hasfollow` 等）。候选键两类都列了，但同一字段拼写若随账号变化，
+  以哪套为准需要人确认（见[待决清单](pending.md)）。
+- **模型里 `has_ldy`→`hasLdy`、`has_qrcx`→`hasQrcx`、`score_mid`→`scoreMid`、`pic_urls`→`picUrls`**
+  是照本层规则转的 camelCase，不是上游那套 `hasLDY`/`scoreMID`/`picURLs`；宿主按上游缩写读键名会读空。
+- **`fetch_artist_tab` 的 `TabID` 在请求里是字符串**（`wiki`/`song_sing`/…，参考 TabType）；
+  冒烟脚本传的是数字 1，移植层按参考声明次序把它映射成字符串，两种都收。
+- **`resolve_song_urls` 顶层 `fileType` 属加密类时改打 `GetEVkey`**；项里各自的加密类型
+  **不参与**这个判断（参考就是如此）。该档实测回 `ekey: null`，宿主需自行决定是否降级到普通档。
+
+
+## 16. 实测响应编码与类型化契约（2026-10-04）
+
+`PlaylistBaseWrite`（建/删歌单）与 `PlaylistDetailWrite`（加/删歌）可能返回 GBK 字节，却标注 UTF-8。
+组件仅在这两个模块且响应不是有效 UTF-8 时尝试 GBK；其他 JSON 路径继续严格校验。异常 UTF-16 单独代理码以 U+FFFD 表示，合法代理码对及字面量反斜线保持原样。
+
+类型化 FFI 按每个协议方法的命名外壳解包（例如 `detail`、`artistDetail`、`stream`、`tracks`），
+外壳缺失时报错，不再反序列化成全空模型。歌词还合并并列的 `wordLyric`。`call_with_platform` 返回原始协议 JSON，保持外壳。
+
+歌手简介请求采用参考的 `singer_mids` 和整数 `1` 开关。助唱、多风格翻译与 AI 词典使用数字 `songID`；助唱请求保留 `needNum:false`。
+无多风格翻译或词典时，上游实测返回 `lyrics:null` / `dictList:null`，这两项归一为空数组。

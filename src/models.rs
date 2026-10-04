@@ -300,6 +300,7 @@ pub struct SongDetail {
     pub album_mid: Option<String>,
     /// The 简介. Empty for most songs, which is an answer and not a failure.
     pub description: String,
+    #[serde(alias = "genreTags")]
     pub genre: Vec<String>,
     pub language: Option<String>,
     pub company: Option<String>,

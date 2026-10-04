@@ -1,0 +1,117 @@
+{
+  "startedAt": "2026-10-04T04:30:48.384007+00:00",
+  "writes": [
+    {
+      "method": "create_playlist",
+      "status": "unknown",
+      "error": "网络请求失败：json: invalid unicode code point at line 1 column 308"
+    },
+    {
+      "method": "fav_album",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "unfav_album",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "set_liked",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "set_liked",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "add_dislike",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "cancel_dislike",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "fav_playlist",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "unfav_playlist",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "delete_playlist",
+      "status": "unknown",
+      "error": "invalid unicode code point",
+      "manuallyInvoked": true
+    }
+  ],
+  "groups": [
+    {
+      "name": "playlist create/add/deduplicate/remove/comment/delete",
+      "status": "failed",
+      "reason": "create_playlist: 网络请求失败：json: invalid unicode code point at line 1 column 308"
+    },
+    {
+      "name": "album roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "liked song roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "dislike roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "external playlist favourite roundtrip",
+      "status": "passed"
+    }
+  ],
+  "restorations": [
+    {
+      "resource": "album favourites",
+      "verified": true
+    },
+    {
+      "resource": "liked songs",
+      "verified": true
+    },
+    {
+      "resource": "disliked songs",
+      "verified": true
+    },
+    {
+      "resource": "external playlist favourites",
+      "verified": true
+    }
+  ],
+  "excluded": [
+    "login/QR flows",
+    "clear_dislike_songs: existing dislike entries retain their original timestamps and order"
+  ],
+  "screenshots": 0,
+  "targets": {
+    "songId": 361947418,
+    "albumId": 28791467,
+    "externalPlaylistId": 7039749142
+  },
+  "finishedAt": "2026-10-04T04:31:09.264384+00:00",
+  "manualRecovery": {
+    "reason": "create succeeded remotely but JSON parsing failed",
+    "method": "delete_playlist",
+    "dirid": 2,
+    "id": 9788130642,
+    "responseError": "invalid unicode code point",
+    "verified": true,
+    "evidence": "fetch_created_playlists total returned from 3 to original 2; exact unique test name absent"
+  }
+}

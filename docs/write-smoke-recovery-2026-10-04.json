@@ -1,0 +1,141 @@
+{
+  "startedAt": "2026-10-04T04:36:06.333568+00:00",
+  "writes": [
+    {
+      "method": "create_playlist",
+      "status": "unknown",
+      "error": "网络请求失败：invalid unicode code point at line 1 column 308"
+    },
+    {
+      "method": "delete_playlist",
+      "status": "unknown",
+      "error": "网络请求失败：invalid unicode code point at line 1 column 308"
+    },
+    {
+      "method": "fav_album",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "unfav_album",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "set_liked",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "set_liked",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "add_dislike",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "cancel_dislike",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "fav_playlist",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "unfav_playlist",
+      "status": "responded",
+      "error": null
+    },
+    {
+      "method": "delete_playlist",
+      "status": "responded",
+      "diagnostic": true,
+      "target": "absent test directory 2",
+      "resultCode": 80083
+    },
+    {
+      "method": "create_playlist",
+      "diagnostic": true,
+      "status": "responded",
+      "name": "HelperNext编码测试-123815"
+    },
+    {
+      "method": "delete_playlist",
+      "diagnostic": true,
+      "status": "unknown",
+      "error": "网络请求失败：invalid unicode code point at line 1 column 299"
+    }
+  ],
+  "groups": [
+    {
+      "name": "playlist create/add/deduplicate/remove/comment/delete",
+      "status": "failed",
+      "reason": "create_playlist: 网络请求失败：invalid unicode code point at line 1 column 308"
+    },
+    {
+      "name": "album roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "liked song roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "dislike roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "external playlist favourite roundtrip",
+      "status": "passed"
+    }
+  ],
+  "restorations": [
+    {
+      "resource": "temporary playlist and its songs",
+      "verified": true,
+      "evidence": "created playlist directory IDs equal baseline",
+      "responseError": "delete_playlist: 网络请求失败：invalid unicode code point at line 1 column 308"
+    },
+    {
+      "resource": "album favourites",
+      "verified": true
+    },
+    {
+      "resource": "liked songs",
+      "verified": true
+    },
+    {
+      "resource": "disliked songs",
+      "verified": true
+    },
+    {
+      "resource": "external playlist favourites",
+      "verified": true
+    },
+    {
+      "resource": "diagnostic nonexistent playlist deletion",
+      "verified": true,
+      "evidence": "target absent before call"
+    },
+    {
+      "resource": "encoding diagnostic test playlist",
+      "verified": true
+    }
+  ],
+  "excluded": [
+    "login/QR flows",
+    "clear_dislike_songs: existing dislike entries retain their original timestamps and order"
+  ],
+  "screenshots": 0,
+  "targets": {
+    "songId": 361947418,
+    "albumId": 28791467,
+    "externalPlaylistId": 7039749142
+  },
+  "finishedAt": "2026-10-04T04:36:27.952851+00:00"
+}

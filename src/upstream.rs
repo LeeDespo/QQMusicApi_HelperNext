@@ -12,7 +12,7 @@
 
 use crate::credential::Credential;
 use crate::device::DeviceStore;
-use crate::guard::{Class, CircuitBreaker, RateLimit};
+use crate::guard::{CircuitBreaker, Class, RateLimit};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -76,7 +76,8 @@ impl Platform {
         }
     }
 }
-const PROFILE_ASSETS_ENDPOINT: &str = "https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg";
+const PROFILE_ASSETS_ENDPOINT: &str =
+    "https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg";
 
 /// One `req_<n>` block.
 pub struct Call {
@@ -198,21 +199,29 @@ impl Upstream {
         call: Call,
     ) -> Result<Value, UpstreamError> {
         let mut body = self.envelope(credential, platform, vec![call])?;
-        if let Some(comm) = body.get_mut("comm").and_then(serde_json::Value::as_object_mut) {
+        if let Some(comm) = body
+            .get_mut("comm")
+            .and_then(serde_json::Value::as_object_mut)
+        {
             comm.insert("tmeLoginType".into(), json!(login_type));
         }
         let response = self.post_json(credential, Class::Account, MUSICU_ENDPOINT, &body, &[])?;
         let slot = response
             .get("req_0")
             .ok_or_else(|| UpstreamError::Upstream("响应里没有 req_0".into()))?;
-        let code = slot.get("code").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        let code = slot
+            .get("code")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
         match slot.get("data") {
             Some(serde_json::Value::Object(data)) if !data.is_empty() => {
                 Ok(serde_json::Value::Object(data.clone()))
             }
             _ => Err(UpstreamError::Upstream(format!(
                 "上游返回错误（{code}）：{}",
-                slot.get("msg").and_then(serde_json::Value::as_str).unwrap_or("")
+                slot.get("msg")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
             ))),
         }
     }
@@ -274,7 +283,10 @@ impl Upstream {
             .map_err(|error| UpstreamError::Upstream(error.to_string()))?;
         let mut query: Vec<(String, String)> = vec![
             ("_".into(), now_millis().to_string()),
-            ("sign".into(), crate::port::signed::zzc_sign(body.as_bytes())),
+            (
+                "sign".into(),
+                crate::port::signed::zzc_sign(body.as_bytes()),
+            ),
         ];
         query.extend(
             params
@@ -288,7 +300,9 @@ impl Upstream {
             .ok_or_else(|| UpstreamError::Upstream("响应里没有 req_0".into()))?;
         let code = slot.get("code").and_then(Value::as_i64).unwrap_or(0);
         if let Some(reason) = refusal_reason(code) {
-            return Err(UpstreamError::Upstream(format!("上游返回错误（{code}）：{reason}")));
+            return Err(UpstreamError::Upstream(format!(
+                "上游返回错误（{code}）：{reason}"
+            )));
         }
         match slot.get("data") {
             Some(Value::Object(data)) if !data.is_empty() => Ok(Value::Object(data.clone())),
@@ -318,7 +332,9 @@ impl Upstream {
         // is how a throttled search turns into an empty page that looks like the
         // catalogue has nothing. (The reference library raises on the same four.)
         if let Some(reason) = refusal_reason(code) {
-            return Err(UpstreamError::Upstream(format!("上游返回错误（{code}）：{reason}")));
+            return Err(UpstreamError::Upstream(format!(
+                "上游返回错误（{code}）：{reason}"
+            )));
         }
         match slot.get("data") {
             Some(Value::Object(data)) if !data.is_empty() => Ok(Value::Object(data.clone())),
@@ -358,7 +374,9 @@ impl Upstream {
         let code = first_int(&response, &["code", "retcode"]).unwrap_or(0);
         if code != 0 {
             let message = first_text(&response, &["msg", "message", "subcode"]).unwrap_or_default();
-            return Err(UpstreamError::Upstream(format!("上游返回错误（{code}）：{message}")));
+            return Err(UpstreamError::Upstream(format!(
+                "上游返回错误（{code}）：{message}"
+            )));
         }
         match response.get("data") {
             Some(Value::Object(data)) if !data.is_empty() => Ok(Value::Object(data.clone())),
@@ -394,7 +412,11 @@ impl Upstream {
         comm.insert("notice".into(), json!(0));
         comm.insert(
             "uin".into(),
-            json!(if credential.music_id.is_empty() { "0".to_string() } else { credential.music_id.clone() }),
+            json!(if credential.music_id.is_empty() {
+                "0".to_string()
+            } else {
+                credential.music_id.clone()
+            }),
         );
         comm.insert("g_tk".into(), json!(credential.g_tk()));
         for (key, value) in platform.comm_overlay() {
@@ -476,7 +498,11 @@ impl Upstream {
         comm.insert("notice".into(), json!(0));
         comm.insert(
             "uin".into(),
-            json!(if credential.music_id.is_empty() { "0".to_string() } else { credential.music_id.clone() }),
+            json!(if credential.music_id.is_empty() {
+                "0".to_string()
+            } else {
+                credential.music_id.clone()
+            }),
         );
         comm.insert("g_tk".into(), json!(credential.g_tk()));
         for (key, value) in Platform::Android.comm_overlay() {
@@ -504,7 +530,10 @@ impl Upstream {
             serde_json::Value::String(text) => text.clone(),
             other => other.to_string(),
         })?;
-        let sid = session.get("sid").and_then(serde_json::Value::as_str)?.to_string();
+        let sid = session
+            .get("sid")
+            .and_then(serde_json::Value::as_str)?
+            .to_string();
         let vkey = session
             .get("vkey")
             .and_then(serde_json::Value::as_str)
@@ -541,9 +570,11 @@ impl Upstream {
 
         match request.send_json(body) {
             Ok(mut response) => {
-                let value: Value = response
+                let bytes = response
                     .body_mut()
-                    .read_json()
+                    .read_to_vec()
+                    .map_err(|error| UpstreamError::Transport(error.to_string()))?;
+                let value = decode_post_json(&bytes, body)
                     .map_err(|error| UpstreamError::Transport(error.to_string()))?;
                 self.breaker.record_success();
                 Ok(value)
@@ -583,9 +614,11 @@ impl Upstream {
 
         match request.send(body) {
             Ok(mut response) => {
-                let value: Value = response
+                let bytes = response
                     .body_mut()
-                    .read_json()
+                    .read_to_vec()
+                    .map_err(|error| UpstreamError::Transport(error.to_string()))?;
+                let value = decode_upstream_json(&bytes)
                     .map_err(|error| UpstreamError::Transport(error.to_string()))?;
                 self.breaker.record_success();
                 Ok(value)
@@ -615,9 +648,11 @@ impl Upstream {
         }
         match request.call() {
             Ok(mut response) => {
-                let value: Value = response
+                let bytes = response
                     .body_mut()
-                    .read_json()
+                    .read_to_vec()
+                    .map_err(|error| UpstreamError::Transport(error.to_string()))?;
+                let value = decode_upstream_json(&bytes)
                     .map_err(|error| UpstreamError::Transport(error.to_string()))?;
                 self.breaker.record_success();
                 Ok(value)
@@ -628,6 +663,106 @@ impl Upstream {
             }
         }
     }
+}
+
+/// PlaylistBaseWrite and PlaylistDetailWrite answer with GBK bytes even when their declared charset is
+/// UTF-8 (verified for a Chinese playlist name). Allow that legacy encoding
+/// only for this request module and only when the response is not valid UTF-8.
+fn decode_post_json(bytes: &[u8], request: &Value) -> Result<Value, serde_json::Error> {
+    let is_playlist_write = request.as_object().is_some_and(|envelope| {
+        envelope.iter().any(|(name, slot)| {
+            name.starts_with("req_")
+                && matches!(
+                    slot.get("module").and_then(Value::as_str),
+                    Some(
+                        "music.musicasset.PlaylistBaseWrite"
+                            | "music.musicasset.PlaylistDetailWrite"
+                    )
+                )
+        })
+    });
+    if is_playlist_write && std::str::from_utf8(bytes).is_err() {
+        let (decoded, had_errors) = encoding_rs::GBK.decode_without_bom_handling(bytes);
+        if !had_errors {
+            return decode_upstream_json(decoded.as_bytes());
+        }
+    }
+    decode_upstream_json(bytes)
+}
+
+/// Decode upstream JSON, tolerating only unpaired UTF-16 surrogate escapes.
+///
+/// Some upstream strings can contain a lone `\uD800`-style code unit, which
+/// Python's JSON decoder accepts but Rust strings cannot represent. Replace
+/// those units with U+FFFD; serde still validates every other part of the JSON.
+fn decode_upstream_json(bytes: &[u8]) -> Result<Value, serde_json::Error> {
+    match serde_json::from_slice(bytes) {
+        Ok(value) => Ok(value),
+        Err(error) => match replace_unpaired_surrogates(bytes) {
+            Some(normalized) => serde_json::from_slice(&normalized),
+            None => Err(error),
+        },
+    }
+}
+
+fn replace_unpaired_surrogates(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut normalized: Option<Vec<u8>> = None;
+    let mut copied_until = 0;
+    let mut in_string = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                in_string = !in_string;
+                index += 1;
+            }
+            b'\\' if in_string => {
+                if let Some(unit) = unicode_escape_at(bytes, index) {
+                    if (0xD800..=0xDBFF).contains(&unit) {
+                        if unicode_escape_at(bytes, index + 6)
+                            .is_some_and(|next| (0xDC00..=0xDFFF).contains(&next))
+                        {
+                            index += 12;
+                            continue;
+                        }
+                    } else if !(0xDC00..=0xDFFF).contains(&unit) {
+                        index += 6;
+                        continue;
+                    }
+                    let output = normalized.get_or_insert_with(|| Vec::with_capacity(bytes.len()));
+                    output.extend_from_slice(&bytes[copied_until..index]);
+                    output.extend_from_slice(br"\uFFFD");
+                    index += 6;
+                    copied_until = index;
+                } else {
+                    // Consume the escaped character with its backslash. This
+                    // keeps literal `\\uD800` and escaped quotes untouched.
+                    index += 2;
+                }
+            }
+            _ => index += 1,
+        }
+    }
+    if let Some(output) = normalized.as_mut() {
+        output.extend_from_slice(&bytes[copied_until..]);
+    }
+    normalized
+}
+
+fn unicode_escape_at(bytes: &[u8], index: usize) -> Option<u16> {
+    let escape = bytes.get(index..index.checked_add(6)?)?;
+    if escape[0] != b'\\' || escape[1] != b'u' {
+        return None;
+    }
+    escape[2..].iter().try_fold(0u16, |value, byte| {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => return None,
+        };
+        Some(value * 16 + u16::from(digit))
+    })
 }
 
 /// The refusal codes the reference library treats as errors, with the same
@@ -720,4 +855,97 @@ pub fn first_array<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Vec<Value>
     keys.iter()
         .find_map(|key| value.get(*key))
         .and_then(Value::as_array)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_post_json, decode_upstream_json, replace_unpaired_surrogates};
+    use serde_json::json;
+
+    #[test]
+    fn playlist_write_decodes_legacy_gbk_chinese_result() {
+        let request = json!({"req_0": {"module": "music.musicasset.PlaylistBaseWrite"}});
+        let bytes =
+            b"{\"req_0\":{\"code\":0,\"data\":{\"result\":{\"dirName\":\"\xb2\xe2\xca\xd4\"}}}}";
+        assert!(std::str::from_utf8(bytes).is_err());
+        let expected = json!({"req_0": {"code": 0, "data": {"result": {"dirName": "测试"}}}});
+        assert_eq!(decode_post_json(bytes, &request).unwrap(), expected);
+        let detail_request = json!({"req_0": {"module": "music.musicasset.PlaylistDetailWrite"}});
+        assert_eq!(decode_post_json(bytes, &detail_request).unwrap(), expected);
+        assert_eq!(
+            decode_post_json(expected.to_string().as_bytes(), &request).unwrap(),
+            expected
+        );
+        let other = json!({"req_0": {"module": "music.musicasset.PlaylistBaseRead"}});
+        assert!(decode_post_json(bytes, &other).is_err());
+        assert!(decode_post_json(bytes, &json!({})).is_err());
+    }
+
+    #[test]
+    fn playlist_write_keeps_json_and_legacy_encoding_validation() {
+        let request = json!({"req_0": {"module": "music.musicasset.PlaylistBaseWrite"}});
+        // A truncated GBK lead byte must never be decoded with replacement.
+        assert!(decode_post_json(b"\"\x81\"", &request).is_err());
+        assert!(decode_post_json(b"\xb2\xe2\xca\xd4", &request).is_err());
+        assert!(decode_post_json(b"{\"name\":\"\xb2\xe2\xca\xd4\",}", &request).is_err());
+        // Valid UTF-8 stays strict, even for this legacy module.
+        assert!(decode_post_json(br#"{"name":"test",}"#, &request).is_err());
+    }
+
+    #[test]
+    fn valid_unicode_pairs_and_literals_are_unchanged() {
+        let bytes = br#"{"pair":"\uD83D\uDE00","literal":"\\uD800","quote":"\"","text":"\u4e2d"}"#;
+        assert!(replace_unpaired_surrogates(bytes).is_none());
+        assert_eq!(
+            decode_upstream_json(bytes).unwrap(),
+            json!({"pair": "😀", "literal": r"\uD800", "quote": "\"", "text": "中"})
+        );
+    }
+
+    #[test]
+    fn lone_surrogates_are_replaced_inside_strings_and_keys() {
+        assert_eq!(
+            decode_upstream_json(
+                br#"{"\uD800":"a\ud800b\uDC00c","pair":"\uD83D\uDE00","literal":"\\uDC00"}"#
+            )
+            .unwrap(),
+            json!({"�": "a�b�c", "pair": "😀", "literal": r"\uDC00"})
+        );
+        assert_eq!(
+            decode_upstream_json(br#""\uDBFF\uD800\uDC00\uDFFF""#).unwrap(),
+            json!("�𐀀�")
+        );
+    }
+
+    #[test]
+    fn ordinary_non_string_json_is_unchanged() {
+        for bytes in [b"null".as_slice(), b"123", b"true", b"[1,false,null]"] {
+            assert!(replace_unpaired_surrogates(bytes).is_none());
+            assert_eq!(
+                decode_upstream_json(bytes).unwrap(),
+                serde_json::from_slice::<serde_json::Value>(bytes).unwrap()
+            );
+        }
+        assert!(replace_unpaired_surrogates(br"\uD800").is_none());
+        assert!(decode_upstream_json(br"\uD800").is_err());
+    }
+
+    #[test]
+    fn all_other_malformed_json_remains_rejected() {
+        for bytes in [
+            br#"{"value":"\uD800",}"#.as_slice(),
+            br#""\uD800\uZZZZ""#,
+            br#""\uD800\x""#,
+            br#""\uD800" trailing"#,
+            br#""\uD800"#,
+            b"\"\\uD800\n\"",
+            b"\"\\uD800\xff\"",
+            br#"["\uD800" true]"#,
+        ] {
+            assert!(
+                decode_upstream_json(bytes).is_err(),
+                "accepted malformed JSON: {bytes:?}"
+            );
+        }
+    }
 }

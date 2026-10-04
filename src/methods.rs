@@ -13,8 +13,10 @@
 
 use crate::credential::{credential_from_cookies, Credential};
 use crate::guard::Class;
-use crate::upstream::{first_array, first_int, first_object, first_text, Call, Platform, UpstreamError};
 pub use crate::upstream::Upstream;
+use crate::upstream::{
+    first_array, first_int, first_object, first_text, Call, Platform, UpstreamError,
+};
 use serde_json::{json, Value};
 
 pub const COMPONENT_VERSION: &str = "0.1.0";
@@ -191,8 +193,10 @@ fn catalog_dispatch(
             first_text(params, &["singerMid", "mid"]).as_deref(),
         )
         .map(|detail| json!({ "detail": detail })),
-        "fetch_toplist_categories" => crate::catalog::toplist_categories(upstream, credential, platform)
-            .map(|groups| json!({ "toplistGroups": groups })),
+        "fetch_toplist_categories" => {
+            crate::catalog::toplist_categories(upstream, credential, platform)
+                .map(|groups| json!({ "toplistGroups": groups }))
+        }
         "fetch_toplist_tracks" => crate::catalog::toplist_tracks(
             upstream,
             credential,
@@ -210,7 +214,10 @@ fn catalog_dispatch(
             platform,
             int("stationId").unwrap_or(0),
             round(int("limit"), 20, 1, 50),
-            params.get("firstPlay").and_then(Value::as_bool).unwrap_or(true),
+            params
+                .get("firstPlay")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
         )
         .map(|tracks| json!({ "tracks": tracks })),
         "fetch_new_songs" => crate::catalog::new_songs(
@@ -230,8 +237,14 @@ fn catalog_dispatch(
             // word-level track from the encrypted one, which carries neither
             // translation nor a readable `lyric` field. Only the word-level read is
             // skippable — it is the one that costs an extra round trip.
-            let want_words = params.get("wordTiming").and_then(Value::as_bool).unwrap_or(true);
-            let want_translation = params.get("translation").and_then(Value::as_bool).unwrap_or(true);
+            let want_words = params
+                .get("wordTiming")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let want_translation = params
+                .get("translation")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
             let song_mid = text("songMid");
             let encrypted = if want_words || want_translation {
                 crate::catalog::encrypted_lyrics(upstream, credential, platform, &song_mid)
@@ -398,7 +411,7 @@ pub fn dispatch(
     params: &Value,
 ) -> Result<Value, UpstreamError> {
     let account = credential.cloned().unwrap_or_default();
-    let platform = platform_for(params, crate::upstream::Platform::default());
+    let platform = platform_for(params, crate::default_platform());
     if let Some(result) = catalog_dispatch(upstream, &account, platform, method, params) {
         return result;
     }
@@ -409,6 +422,15 @@ pub fn dispatch(
         return result;
     }
     match method {
+        "set_rate_limit" => Ok(configure_rate_limit(upstream, params)),
+        "set_breaker" => Ok(configure_breaker(upstream, params)),
+        "aria2_status" => aria2_status(upstream, params),
+        "aria2_restart" => aria2_restart(upstream),
+        "aria2_configure" => Ok(aria2_configure(upstream, params)),
+        "aria2_add" => aria2_add(upstream, params),
+        "aria2_tell" => aria2_tell(upstream, params),
+        "aria2_list" => aria2_list(upstream),
+        "aria2_pause" | "aria2_unpause" | "aria2_cancel" => aria2_control(upstream, method, params),
         "get_helper_info" => {
             // The advertised method list is the union of the original table and
             // the ported endpoints, so a host that enumerates what the component
@@ -460,10 +482,16 @@ pub fn dispatch(
         // component never puts a credential in a JSON reply.
         "import_cookies" => Err(UpstreamError::Upstream("import_cookies 由入口处理".into())),
         "logout" => Ok(json!({ "login": json!({ "loggedIn": false }) })),
-        "fetch_liked_songs" => Ok(json!({ "likedSongs": liked_songs(upstream, &account, params)? })),
+        "fetch_liked_songs" => {
+            Ok(json!({ "likedSongs": liked_songs(upstream, &account, params)? }))
+        }
         "fetch_liked_albums" => Ok(json!({ "albums": liked_albums(upstream, &account, params)? })),
-        "fetch_user_playlists" => Ok(json!({ "playlists": user_playlists(upstream, &account, params)? })),
-        "fetch_followed_artists" => Ok(json!({ "artists": followed_artists(upstream, &account, params)? })),
+        "fetch_user_playlists" => {
+            Ok(json!({ "playlists": user_playlists(upstream, &account, params)? }))
+        }
+        "fetch_followed_artists" => {
+            Ok(json!({ "artists": followed_artists(upstream, &account, params)? }))
+        }
         "fetch_playlist_tracks" => {
             let (tracks, total) = playlist_tracks(upstream, &account, params)?;
             Ok(json!({ "tracks": tracks, "total": total }))
@@ -519,7 +547,10 @@ pub fn configure_rate_limit(upstream: &Upstream, params: &Value) -> Value {
 ///   "failureWindowSeconds":120,"openSeconds":300}}
 /// ```
 pub fn configure_breaker(upstream: &Upstream, params: &Value) -> Value {
-    let enabled = params.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+    let enabled = params
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let failure_threshold = first_int(params, &["failureThreshold", "threshold"])
         .unwrap_or(5)
         .clamp(1, 100);
@@ -552,7 +583,10 @@ pub fn configure_breaker(upstream: &Upstream, params: &Value) -> Value {
 /// while a download wants it up. Starting a background process as a side effect
 /// of opening a settings window would be surprising.
 pub fn aria2_status(upstream: &Upstream, params: &Value) -> Result<Value, UpstreamError> {
-    let ensure = params.get("ensure").and_then(Value::as_bool).unwrap_or(false);
+    let ensure = params
+        .get("ensure")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     if ensure {
         upstream.aria2.ensure_running()?;
     }
@@ -610,7 +644,11 @@ pub fn aria2_list(upstream: &Upstream) -> Result<Value, UpstreamError> {
 ///
 /// Cancel also deletes the partial file — the app's own words for it ("取消的同时
 /// 删除临时文件"), and the reason it is not just `aria2.remove`.
-pub fn aria2_control(upstream: &Upstream, method: &str, params: &Value) -> Result<Value, UpstreamError> {
+pub fn aria2_control(
+    upstream: &Upstream,
+    method: &str,
+    params: &Value,
+) -> Result<Value, UpstreamError> {
     let gid = first_text(params, &["gid"]).filter(|value| !value.is_empty());
     match method {
         "aria2_pause" => upstream.aria2.pause(gid.as_deref())?,
@@ -652,7 +690,9 @@ fn login_status(upstream: &Upstream, credential: &Credential) -> Result<Value, U
         Err(UpstreamError::Upstream(_)) => {
             // A rejected credential is an answer, not a failure: report it as
             // "not logged in" so the app shows the login entry again.
-            return Ok(json!({ "loggedIn": false, "hasPlaybackKey": !credential.music_key.is_empty() }));
+            return Ok(
+                json!({ "loggedIn": false, "hasPlaybackKey": !credential.music_key.is_empty() }),
+            );
         }
         Err(error) => return Err(error),
     };
@@ -696,7 +736,9 @@ fn liked_songs(
             }),
         },
     )?;
-    let info = first_object(&data, &["dirinfo"]).cloned().unwrap_or(json!({}));
+    let info = first_object(&data, &["dirinfo"])
+        .cloned()
+        .unwrap_or(json!({}));
     let tracks = decoded_tracks(&data);
     Ok(json!({
         "title": first_text(&info, &["title"]).unwrap_or_else(|| "我喜欢".into()),
@@ -762,7 +804,9 @@ fn user_playlists(
     require_login(credential)?;
     let limit = first_int(params, &["limit"]).unwrap_or(100).clamp(1, 100);
     let data = upstream.profile_assets(credential, 3, limit as u32)?;
-    let items = first_array(&data, &["cdlist", "disslist", "list"]).cloned().unwrap_or_default();
+    let items = first_array(&data, &["cdlist", "disslist", "list"])
+        .cloned()
+        .unwrap_or_default();
     Ok(items
         .iter()
         .filter_map(|item| {
@@ -794,7 +838,9 @@ fn liked_albums(
     require_login(credential)?;
     let limit = first_int(params, &["limit"]).unwrap_or(30).clamp(1, 100);
     let data = upstream.profile_assets(credential, 2, limit as u32)?;
-    let items = first_array(&data, &["albumlist", "cdlist", "list"]).cloned().unwrap_or_default();
+    let items = first_array(&data, &["albumlist", "cdlist", "list"])
+        .cloned()
+        .unwrap_or_default();
     Ok(items
         .iter()
         .filter_map(|item| {
@@ -850,7 +896,9 @@ fn followed_artists(
     // The key really is `List` with a capital L — the library's model calls it
     // `users`, and reading the wrong name cost a round of "this feature does not
     // exist" once already.
-    let items = first_array(&data, &["List", "list", "users"]).cloned().unwrap_or_default();
+    let items = first_array(&data, &["List", "list", "users"])
+        .cloned()
+        .unwrap_or_default();
     Ok(items
         .iter()
         .filter_map(|item| {
@@ -891,7 +939,13 @@ pub fn decoded_tracks(data: &Value) -> Vec<Value> {
     let items = first_array(
         data,
         &[
-            "songlist", "songList", "songs", "list", "tracks", "track_list", "songInfoList",
+            "songlist",
+            "songList",
+            "songs",
+            "list",
+            "tracks",
+            "track_list",
+            "songInfoList",
         ],
     )
     .cloned()
@@ -1013,6 +1067,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn typed_configuration_calls_reach_the_shared_dispatcher_without_login() {
+        let upstream = Upstream::new();
+        let rate = dispatch(
+            &upstream,
+            None,
+            "set_rate_limit",
+            &json!({"enabled":false,"maxRequests":17}),
+        )
+        .unwrap();
+        assert_eq!(rate["rateLimit"]["enabled"], false);
+        assert_eq!(upstream.limiter.config().max_calls, 17);
+        let breaker = dispatch(
+            &upstream,
+            None,
+            "set_breaker",
+            &json!({"enabled":false,"failureThreshold":7}),
+        )
+        .unwrap();
+        assert_eq!(breaker["breaker"]["failureThreshold"], 7);
+        assert!(!upstream.breaker.config().enabled);
+        let engine = dispatch(&upstream, None, "aria2_configure", &json!({"split":3})).unwrap();
+        assert_eq!(engine["aria2"]["options"]["split"], 3);
+    }
+
+    #[test]
     fn artwork_urls_are_forced_onto_https() {
         assert_eq!(
             normalized_artwork_url(Some("http://y.gtimg.cn/a.jpg")).unwrap(),
@@ -1094,12 +1173,14 @@ mod tests {
 
     #[test]
     fn a_cookie_import_produces_a_credential_for_the_caller_to_store() {
-        let credential = credential_from_params(
-            &json!({"cookies": {"uin": "1234567890", "qm_keyst": "KEY"}}),
-        )
-        .expect("a complete cookie set is a login");
+        let credential =
+            credential_from_params(&json!({"cookies": {"uin": "1234567890", "qm_keyst": "KEY"}}))
+                .expect("a complete cookie set is a login");
         assert_eq!(credential.music_id, "1234567890");
         let missing = credential_from_params(&json!({"cookies": {}}));
-        assert!(missing.is_err(), "a cookie set without qm_keyst is not a login");
+        assert!(
+            missing.is_err(),
+            "a cookie set without qm_keyst is not a login"
+        );
     }
 }

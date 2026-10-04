@@ -1,0 +1,595 @@
+{
+  "passed": 76,
+  "failed": 0,
+  "skipped": 0,
+  "failures": [],
+  "checked": [
+    "fetch_comment_count",
+    "fetch_hot_comments",
+    "fetch_new_comments",
+    "fetch_mv_detail",
+    "resolve_mv_urls",
+    "fetch_mv_list",
+    "fetch_singer_list",
+    "fetch_singer_index",
+    "fetch_similar_artists",
+    "fetch_artist_tab",
+    "fetch_artist_display_name",
+    "fetch_artist_mvs",
+    "query_songs",
+    "fetch_cdn_dispatch",
+    "fetch_song_producer",
+    "fetch_song_fav_count",
+    "fetch_similar_songs",
+    "fetch_song_labels",
+    "fetch_related_playlists",
+    "fetch_related_mvs",
+    "fetch_fav_playlists",
+    "fetch_fav_albums",
+    "fetch_fav_mvs",
+    "fetch_music_gene",
+    "fetch_dislike_list",
+    "fetch_user_homepage",
+    "fetch_vip_info",
+    "fetch_follow_singers",
+    "fetch_fans",
+    "fetch_friends",
+    "fetch_followed_users",
+    "fetch_created_playlists",
+    "fetch_home_feed",
+    "fetch_radar_recommend",
+    "fetch_recommend_playlists",
+    "fetch_search_hotkeys",
+    "complete_search",
+    "quick_search",
+    "general_search",
+    "fetch_recommend_comments",
+    "fetch_moment_comments",
+    "resolve_song_urls",
+    "fetch_other_versions",
+    "fetch_sheet_music",
+    "has_sheet_music",
+    "search_extra",
+    "fetch_new_albums",
+    "fetch_singing_annotations",
+    "fetch_multi_style_lyrics",
+    "has_ai_dictionary",
+    "fetch_ai_dictionary",
+    "fetch_user_liked_songs"
+  ],
+  "skips": [],
+  "cases": [
+    {
+      "method": "fetch_comment_count",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 528
+    },
+    {
+      "method": "fetch_hot_comments",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 131
+    },
+    {
+      "method": "fetch_hot_comments",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 106
+    },
+    {
+      "method": "fetch_new_comments",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 194
+    },
+    {
+      "method": "fetch_new_comments",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 157
+    },
+    {
+      "method": "fetch_mv_detail",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 103
+    },
+    {
+      "method": "resolve_mv_urls",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 131
+    },
+    {
+      "method": "fetch_mv_list",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 189
+    },
+    {
+      "method": "fetch_mv_list",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 180
+    },
+    {
+      "method": "fetch_singer_list",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 184
+    },
+    {
+      "method": "fetch_singer_index",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 109
+    },
+    {
+      "method": "fetch_singer_index",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 88
+    },
+    {
+      "method": "fetch_similar_artists",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 153
+    },
+    {
+      "method": "fetch_artist_tab",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 248
+    },
+    {
+      "method": "fetch_artist_tab",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 239
+    },
+    {
+      "method": "fetch_artist_display_name",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 205
+    },
+    {
+      "method": "fetch_artist_mvs",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 101
+    },
+    {
+      "method": "fetch_artist_mvs",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 101
+    },
+    {
+      "method": "query_songs",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 89
+    },
+    {
+      "method": "fetch_cdn_dispatch",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 90
+    },
+    {
+      "method": "fetch_song_producer",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 94
+    },
+    {
+      "method": "fetch_song_fav_count",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 109
+    },
+    {
+      "method": "fetch_similar_songs",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 231
+    },
+    {
+      "method": "fetch_song_labels",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 116
+    },
+    {
+      "method": "fetch_related_playlists",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 102
+    },
+    {
+      "method": "fetch_related_mvs",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 96
+    },
+    {
+      "method": "fetch_fav_playlists",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 94
+    },
+    {
+      "method": "fetch_fav_albums",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 91
+    },
+    {
+      "method": "fetch_fav_mvs",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 83
+    },
+    {
+      "method": "fetch_music_gene",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 171
+    },
+    {
+      "method": "fetch_dislike_list",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 98
+    },
+    {
+      "method": "fetch_user_homepage",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 89
+    },
+    {
+      "method": "fetch_vip_info",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 212
+    },
+    {
+      "method": "fetch_follow_singers",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 136
+    },
+    {
+      "method": "fetch_fans",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 129
+    },
+    {
+      "method": "fetch_friends",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 486
+    },
+    {
+      "method": "fetch_followed_users",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 114
+    },
+    {
+      "method": "fetch_created_playlists",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 144
+    },
+    {
+      "method": "fetch_home_feed",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 812
+    },
+    {
+      "method": "fetch_radar_recommend",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 877
+    },
+    {
+      "method": "fetch_recommend_playlists",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 297
+    },
+    {
+      "method": "fetch_recommend_playlists",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 297
+    },
+    {
+      "method": "fetch_search_hotkeys",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 156
+    },
+    {
+      "method": "complete_search",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 153
+    },
+    {
+      "method": "quick_search",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 143
+    },
+    {
+      "method": "general_search",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 624
+    },
+    {
+      "method": "general_search",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 481
+    },
+    {
+      "method": "fetch_recommend_comments",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 161
+    },
+    {
+      "method": "fetch_moment_comments",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 102
+    },
+    {
+      "method": "resolve_song_urls",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 173
+    },
+    {
+      "method": "fetch_other_versions",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 103
+    },
+    {
+      "method": "fetch_sheet_music",
+      "case": "type=0",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 147
+    },
+    {
+      "method": "fetch_sheet_music",
+      "case": "type=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 137
+    },
+    {
+      "method": "fetch_sheet_music",
+      "case": "type=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 175
+    },
+    {
+      "method": "has_sheet_music",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 126
+    },
+    {
+      "method": "search_extra",
+      "case": "type=0,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 368
+    },
+    {
+      "method": "search_extra",
+      "case": "type=1,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 259
+    },
+    {
+      "method": "search_extra",
+      "case": "type=2,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 223
+    },
+    {
+      "method": "search_extra",
+      "case": "type=3,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 283
+    },
+    {
+      "method": "search_extra",
+      "case": "type=4,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 303
+    },
+    {
+      "method": "search_extra",
+      "case": "type=7,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 406
+    },
+    {
+      "method": "search_extra",
+      "case": "type=8,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 298
+    },
+    {
+      "method": "search_extra",
+      "case": "type=10,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 268
+    },
+    {
+      "method": "search_extra",
+      "case": "type=15,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 376
+    },
+    {
+      "method": "search_extra",
+      "case": "type=18,page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 691
+    },
+    {
+      "method": "search_extra",
+      "case": "type=0,page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 359
+    },
+    {
+      "method": "fetch_new_albums",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 121
+    },
+    {
+      "method": "fetch_new_albums",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 148
+    },
+    {
+      "method": "fetch_singing_annotations",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 101
+    },
+    {
+      "method": "fetch_multi_style_lyrics",
+      "case": "reference-sample",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 190
+    },
+    {
+      "method": "fetch_multi_style_lyrics",
+      "case": "no-extra-content-sample",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 109
+    },
+    {
+      "method": "has_ai_dictionary",
+      "case": "default",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 193
+    },
+    {
+      "method": "fetch_ai_dictionary",
+      "case": "reference-sample",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 166
+    },
+    {
+      "method": "fetch_ai_dictionary",
+      "case": "no-extra-content-sample",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 196
+    },
+    {
+      "method": "fetch_user_liked_songs",
+      "case": "page=1",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 144
+    },
+    {
+      "method": "fetch_user_liked_songs",
+      "case": "page=2",
+      "reason": "schema/content validated",
+      "status": "passed",
+      "durationMs": 118
+    }
+  ]
+}
