@@ -236,7 +236,9 @@ fn random_beacon_id() -> String {
     let mut beacon = String::new();
     for index in 1..=40 {
         let value = match index {
-            _ if [1, 2, 13, 14, 17, 18, 21, 22, 25, 26, 29, 30, 33, 34, 37, 38].contains(&index) => {
+            _ if [1, 2, 13, 14, 17, 18, 21, 22, 25, 26, 29, 30, 33, 34, 37, 38]
+                .contains(&index) =>
+            {
                 format!("{month}{rand1}.{rand2}")
             }
             3 => "0000000000000000".to_string(),
@@ -350,7 +352,8 @@ fn fetch_qimei(agent: &ureq::Agent, device: &Device) -> Result<(String, String),
     let timestamp = now();
     let key = engine.encode(rsa_encrypt(crypt_key.as_bytes())?);
     let params = engine.encode(
-        aes_cbc_encrypt(crypt_key.as_bytes(), payload.to_string().as_bytes()).map_err(|error| error)?,
+        aes_cbc_encrypt(crypt_key.as_bytes(), payload.to_string().as_bytes())
+            .map_err(|error| error)?,
     );
     let extra = format!("{{\"appKey\":\"{APP_KEY}\"}}");
     let request_sign = md5_hex(&[
@@ -429,7 +432,10 @@ mod tests {
         assert_eq!(first.android_id.len(), 16);
         let second = store.load_or_create();
         assert_eq!(first.android_id, second.android_id, "the device is kept");
-        assert!(store.cached_identity().is_none(), "no identity before asking");
+        assert!(
+            store.cached_identity().is_none(),
+            "no identity before asking"
+        );
         let _ = std::fs::remove_dir_all(&directory);
     }
 
@@ -448,10 +454,8 @@ mod tests {
         let plaintext = hex_bytes("6bc1bee22e409f96e93d7e117393172a");
         let encrypted = {
             use aes::cipher::{block_padding::NoPadding, BlockEncryptMut, KeyIvInit};
-            let encryptor = cbc::Encryptor::<aes::Aes128>::new(
-                key.as_slice().into(),
-                iv.as_slice().into(),
-            );
+            let encryptor =
+                cbc::Encryptor::<aes::Aes128>::new(key.as_slice().into(), iv.as_slice().into());
             encryptor.encrypt_padded_vec_mut::<NoPadding>(&plaintext)
         };
         assert_eq!(hex_string(&encrypted), "7649abac8119b246cee98e9b12e9197d");

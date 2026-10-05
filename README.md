@@ -52,14 +52,15 @@ QQMusicApi 用 Python 实现了 QQ 音乐接口的完整协议工作（请求签
 凭据刷新、退出登录、登录状态。
 
 **曲库**：我喜欢、我的歌单、收藏专辑、关注的歌手、歌单/排行榜/专辑曲目、歌手（歌曲 / 专辑 / 资料 / 简介 / 列表 / 索引 /
-相似歌手 / 主页 Tab / 名称图像 / 歌手 MV）、排行榜分组、电台、新歌、猜你喜欢、推荐（首页信息流 / 雷达 / 推荐歌单）、
+相似歌手 / 主页 Tab / 名称图像 / 歌手 MV）、排行榜分组、电台（分组 / 无穷轮播批次）、新歌、猜你喜欢、推荐（首页信息流 / 雷达 / 推荐歌单）、
 搜索（歌曲 / 歌手 / 专辑 / 歌单 / 热搜 / 联想补全 / 快速搜索 / 综合搜索 / 全部 10 个搜索类型）、
-新碟上架、指定用户喜欢的歌曲、歌曲与专辑简介、歌词（整行与**逐字**、助唱标注、多风格翻译与 AI 词典）、取流地址（按音质阶梯探测 / 批量取流 / CDN 调度）、
+新碟上架、指定用户喜欢的歌曲、歌曲与专辑简介、歌词（整行 / **逐字毫秒** / 音译、助唱标注、多风格翻译与 AI 词典）、取流地址（六档音质阶梯探测 / 批量取流 / CDN 调度）、
 歌曲资产（批量信息 / 其他版本 / 制作人 / 收藏数）、歌曲关联（相似 / 标签 / 相关歌单 / 相关 MV / 乐谱）、
 MV（详情 / 播放地址 / 分类列表）、评论（数量 / 热评 / 新评 / 推荐评 / 时刻评论 / 发 / 删）、
 账号资产（收藏歌单 / 专辑 / MV、音乐基因、不喜欢列表）、账号关系（主页 / VIP / 关注的歌手 / 粉丝 / 好友 / 关注的人 /
 创建的歌单）、集合写入（建 / 删歌单、歌单加删歌、收藏与取消收藏专辑）、
-收藏与取消收藏（`set_liked`）、本地曲库的封面匹配（歌曲 / 歌手 / 专辑）。
+收藏与取消收藏（`set_liked` / 数字 ID 回执 `set_liked_by_id`）、本地曲库的封面匹配（歌曲 / 歌手 / 专辑）。
+列表页统一按上游原始行数分页：喜欢 / 歌单 / 专辑 / 歌手曲目页回 `total` 与 `nextOffset`（含被过滤的行），歌手专辑页回 `total` 与每张曲数。
 
 **运行时**：限流与熔断（可配置）、下载引擎的托管（Aria2 Next 的排队、进度、暂停、取消）。
 
@@ -72,11 +73,14 @@ MV（详情 / 播放地址 / 分类列表）、评论（数量 / 热评 / 新评
 ### Rust
 
 ```rust
-use qqmusic_api_helper_next::{api, configure, Configuration};
+use qqmusic_api_helper_next::{api, configure, Configuration, Platform};
 
 fn main() -> Result<(), qqmusic_api_helper_next::HelperError> {
     // 宿主自己的可写目录；组件不会去猜平台的路径。
-    configure(Configuration { data_dir: "/path/to/app-support".into() });
+    configure(Configuration {
+        data_dir: "/path/to/app-support".into(),
+        default_platform: Platform::Web,
+    });
 
     if api::login_status()?.logged_in {
         let liked = api::liked_songs(1, 50)?;
@@ -91,7 +95,7 @@ fn main() -> Result<(), qqmusic_api_helper_next::HelperError> {
 ```swift
 import QqmusicApiHelperNext
 
-try configure(dataDir: appSupport.path)
+try initialize(dataDir: appSupport.path, platform: "web")
 if try loginStatus().loggedIn {
     let liked = try likedSongs(page: 1, limit: 50)
     print("\(liked.tracks.count) / \(liked.total)")
@@ -101,6 +105,7 @@ if try loginStatus().loggedIn {
 ### Kotlin（BoltFFI 生成）
 
 ```kotlin
+initialize(context.filesDir.absolutePath, "android")
 if (loginStatus().loggedIn) {
     val liked = likedSongs(page = 1u, limit = 50u)
     println("${liked.tracks.size} / ${liked.total}")
@@ -111,7 +116,7 @@ if (loginStatus().loggedIn) {
 
 ```sh
 echo '{"id":"1","method":"get_helper_info","params":{}}' | qqmusic-helper-next
-# {"id":"1","ok":true,"helper":{"helperVersion":"0.1.0","protocolVersion":2,…}}
+# {"id":"1","ok":true,"helper":{"helperVersion":"0.2.0","protocolVersion":2,…}}
 ```
 
 生成绑定与打包：

@@ -115,6 +115,17 @@ pub struct TrackPage {
     pub tracks: Vec<Track>,
     /// `None` when the endpoint reports no total, which is not the same as zero.
     pub total: Option<i64>,
+    /// Next upstream row offset, including malformed rows omitted from `tracks`.
+    pub next_offset: Option<i64>,
+}
+
+/// A page of an artist's albums, preserving its total.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumPage {
+    pub albums: Vec<Album>,
+    pub total: Option<i64>,
 }
 
 /// One credited singer of a track.
@@ -152,6 +163,20 @@ pub struct Track {
     pub singers: Option<Vec<Singer>>,
     /// Present when the source supplied it (artist "latest" ordering attaches it).
     pub release_date: Option<String>,
+    /// Numeric QQ genre code; absent when the endpoint does not provide one.
+    pub genre: Option<i64>,
+    /// Available file variants. Vec keeps this model representable by BoltFFI.
+    #[serde(default)]
+    pub file_sizes: Vec<TrackFileSize>,
+}
+
+/// A media file size advertised in a track's `file` object.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackFileSize {
+    pub name: String,
+    pub bytes: i64,
 }
 
 /// The account's "我喜欢", with the folder's own total.
@@ -176,6 +201,7 @@ pub struct Album {
     pub cover_url: Option<String>,
     pub artist: Option<String>,
     pub release_date: Option<String>,
+    pub song_count: Option<i64>,
 }
 
 /// A playlist (the account's own, or one found by search).
@@ -285,6 +311,37 @@ mod tests {
         assert_eq!(track.image_url.as_deref(), Some("https://y.gtimg.cn/a.jpg"));
         assert_eq!(track.singers.as_ref().map(Vec::len), Some(1));
     }
+
+    #[test]
+    fn added_catalogue_metadata_is_optional_for_older_responses() {
+        let legacy_track: Track = serde_json::from_value(serde_json::json!({
+            "songMid": "legacy",
+            "title": "旧曲目",
+            "artist": ""
+        }))
+        .expect("older track payload remains readable");
+        assert_eq!(legacy_track.genre, None);
+        assert!(legacy_track.file_sizes.is_empty());
+
+        let enriched_track: Track = serde_json::from_value(serde_json::json!({
+            "songMid": "new",
+            "title": "新曲目",
+            "artist": "歌手",
+            "genre": 7,
+            "fileSizes": [{"name":"128mp3","bytes":1234}]
+        }))
+        .expect("new track metadata decodes");
+        assert_eq!(enriched_track.genre, Some(7));
+        assert_eq!(enriched_track.file_sizes[0].name, "128mp3");
+        assert_eq!(enriched_track.file_sizes[0].bytes, 1234);
+
+        let legacy_album: Album = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "title": "旧专辑"
+        }))
+        .expect("older album payload remains readable");
+        assert_eq!(legacy_album.song_count, None);
+    }
 }
 
 /// A song's catalogue entry: the facts plus the prose the service publishes.
@@ -393,6 +450,19 @@ pub struct Lyric {
     pub translation: Option<String>,
     pub romanization: Option<String>,
     pub word_lyric: Option<String>,
+    pub qrc_lines: Option<Vec<crate::qrc::QrcLine>>,
+    pub roman_lines: Option<Vec<crate::qrc::QrcLine>>,
+}
+
+/// A typed receipt for the `我喜欢` write, including upstream business codes.
+#[data]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LikeReceipt {
+    pub success: bool,
+    pub code: i64,
+    /// `1000` is the account-write throttle code.
+    pub throttled: bool,
 }
 
 /// A resolved playback url, or why there is none.

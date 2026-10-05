@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! $ echo '{"id":"1","method":"get_helper_info","params":{}}' | qqmusic-helper-next
-//! {"id":"1","ok":true,"helper":{"helperVersion":"0.1.0",…}}
+//! {"id":"1","ok":true,"helper":{"helperVersion":"0.2.0",…}}
 //! ```
 //!
 //! stdout is reserved for protocol JSON; diagnostics go to stderr. The

@@ -23,7 +23,9 @@
 //! timestamps — one per word. So the deliverable is an ordinary LRC with a tag
 //! before every word, which every LRC reader (including ours) already accepts.
 
+use boltffi::data;
 use miniz_oxide::inflate::decompress_to_vec_zlib;
+use serde::{Deserialize, Serialize};
 
 /// The three DES keys, back to back. QQ's own constant.
 const KEY: &[u8; 24] = b"!@#)(*$%123ZXC!@!@#)(NHL";
@@ -49,7 +51,9 @@ impl std::fmt::Display for QrcError {
 }
 
 /// One word, with the times the service gave it (milliseconds).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[data]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QrcWord {
     pub text: String,
     pub start_ms: i64,
@@ -57,7 +61,9 @@ pub struct QrcWord {
 }
 
 /// One lyric line.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[data]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QrcLine {
     pub start_ms: i64,
     pub duration_ms: i64,
@@ -85,13 +91,13 @@ const KEY_PERM_D: [usize; 28] = [
 const KEY_RND_SHIFT: [usize; 16] = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
 const IP_RULE: [usize; 64] = [
     34, 42, 50, 58, 2, 10, 18, 26, 36, 44, 52, 60, 4, 12, 20, 28, 38, 46, 54, 62, 6, 14, 22, 30,
-    40, 48, 56, 64, 8, 16, 24, 32, 33, 41, 49, 57, 1, 9, 17, 25, 35, 43, 51, 59, 3, 11, 19, 27,
-    37, 45, 53, 61, 5, 13, 21, 29, 39, 47, 55, 63, 7, 15, 23, 31,
+    40, 48, 56, 64, 8, 16, 24, 32, 33, 41, 49, 57, 1, 9, 17, 25, 35, 43, 51, 59, 3, 11, 19, 27, 37,
+    45, 53, 61, 5, 13, 21, 29, 39, 47, 55, 63, 7, 15, 23, 31,
 ];
 const INV_IP_RULE: [usize; 64] = [
     37, 5, 45, 13, 53, 21, 61, 29, 38, 6, 46, 14, 54, 22, 62, 30, 39, 7, 47, 15, 55, 23, 63, 31,
-    40, 8, 48, 16, 56, 24, 64, 32, 33, 1, 41, 9, 49, 17, 57, 25, 34, 2, 42, 10, 50, 18, 58, 26,
-    35, 3, 43, 11, 51, 19, 59, 27, 36, 4, 44, 12, 52, 20, 60, 28,
+    40, 8, 48, 16, 56, 24, 64, 32, 33, 1, 41, 9, 49, 17, 57, 25, 34, 2, 42, 10, 50, 18, 58, 26, 35,
+    3, 43, 11, 51, 19, 59, 27, 36, 4, 44, 12, 52, 20, 60, 28,
 ];
 const P_BOX: [usize; 32] = [
     16, 7, 20, 21, 29, 12, 28, 17, 1, 15, 23, 26, 5, 18, 31, 10, 2, 8, 24, 14, 32, 27, 3, 9, 19,
@@ -119,8 +125,8 @@ const S_BOXES: [[u8; 64]; 8] = [
     ],
     [
         7, 13, 14, 3, 0, 6, 9, 10, 1, 2, 8, 5, 11, 12, 4, 15, 13, 8, 11, 5, 6, 15, 0, 3, 4, 7, 2,
-        12, 1, 10, 14, 9, 10, 6, 9, 0, 12, 11, 7, 13, 15, 1, 3, 14, 5, 2, 8, 4, 3, 15, 0, 6, 10, 10,
-        13, 8, 9, 4, 5, 11, 12, 7, 2, 14,
+        12, 1, 10, 14, 9, 10, 6, 9, 0, 12, 11, 7, 13, 15, 1, 3, 14, 5, 2, 8, 4, 3, 15, 0, 6, 10,
+        10, 13, 8, 9, 4, 5, 11, 12, 7, 2, 14,
     ],
     [
         2, 12, 4, 1, 7, 10, 11, 6, 8, 5, 3, 15, 13, 0, 14, 9, 14, 11, 2, 12, 4, 7, 13, 1, 5, 0, 15,
@@ -304,10 +310,14 @@ fn round_function(state: u32, key_high: u32, key_low: u32) -> u32 {
     let b1 = ((state >> 16) & 0xFF) as usize;
     let b2 = ((state >> 8) & 0xFF) as usize;
     let b3 = (state & 0xFF) as usize;
-    let expanded_high =
-        tables.eb_high[b0] | tables.eb_high[256 | b1] | tables.eb_high[512 | b2] | tables.eb_high[768 | b3];
-    let expanded_low =
-        tables.eb_low[b0] | tables.eb_low[256 | b1] | tables.eb_low[512 | b2] | tables.eb_low[768 | b3];
+    let expanded_high = tables.eb_high[b0]
+        | tables.eb_high[256 | b1]
+        | tables.eb_high[512 | b2]
+        | tables.eb_high[768 | b3];
+    let expanded_low = tables.eb_low[b0]
+        | tables.eb_low[256 | b1]
+        | tables.eb_low[512 | b2]
+        | tables.eb_low[768 | b3];
     let xh = expanded_high ^ key_high;
     let xl = expanded_low ^ key_low;
     tables.sp[((xh >> 18) & 0x3F) as usize]
@@ -379,13 +389,17 @@ pub fn decrypt_hex(hex: &str) -> Result<String, QrcError> {
     let mut encrypted = Vec::with_capacity(hex.len() / 2);
     let bytes = hex.as_bytes();
     for pair in bytes.chunks(2) {
-        let text = std::str::from_utf8(pair).map_err(|_| QrcError::NotCiphertext("含非 ASCII".into()))?;
+        let text =
+            std::str::from_utf8(pair).map_err(|_| QrcError::NotCiphertext("含非 ASCII".into()))?;
         let byte = u8::from_str_radix(text, 16)
             .map_err(|_| QrcError::NotCiphertext(format!("不是十六进制：{text}")))?;
         encrypted.push(byte);
     }
     if encrypted.is_empty() || encrypted.len() % 8 != 0 {
-        return Err(QrcError::NotCiphertext(format!("长度 {} 不是 8 的倍数", encrypted.len())));
+        return Err(QrcError::NotCiphertext(format!(
+            "长度 {} 不是 8 的倍数",
+            encrypted.len()
+        )));
     }
 
     let schedules = schedules();
@@ -417,13 +431,13 @@ pub fn extract_payload(xml: &str) -> Option<String> {
     if let Some(start) = xml.find("<![CDATA[") {
         if let Some(end) = xml[start..].find("]]>") {
             let content = &xml[start + "<![CDATA[".len()..start + end];
-            return Some(content.trim().to_string());
+            return Some(content.to_string());
         }
     }
     let marker = "LyricContent=\"";
     let start = xml.find(marker)? + marker.len();
     let end = xml[start..].find('"')? + start;
-    Some(decode_entities(&xml[start..end]).trim().to_string())
+    Some(decode_entities(&xml[start..end]).to_string())
 }
 
 fn decode_entities(text: &str) -> String {
@@ -440,32 +454,49 @@ fn decode_entities(text: &str) -> String {
 pub fn parse(payload: &str) -> Vec<QrcLine> {
     let mut lines = Vec::new();
     for raw in payload.split(['\n', '\r']) {
-        let line = raw.trim();
-        if line.is_empty() {
+        let Some(header_start) = raw.find(|ch: char| !ch.is_whitespace()) else {
             continue;
-        }
-        let Some(header_end) = line.find(']') else { continue };
+        };
+        let line = &raw[header_start..];
+        let Some(header_end) = line.find(']') else {
+            continue;
+        };
         if !line.starts_with('[') {
             continue;
         }
         let header = &line[1..header_end];
         let mut header_parts = header.split(',');
-        let Some(start) = header_parts.next().and_then(|v| v.trim().parse::<i64>().ok()) else {
+        let Some(start) = header_parts
+            .next()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+        else {
             continue;
         };
-        let duration = header_parts.next().and_then(|v| v.trim().parse::<i64>().ok()).unwrap_or(0);
+        let duration = header_parts
+            .next()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(0);
 
-        let content = line[header_end + 1..].trim();
+        // Do not trim the QRC text: spaces belong to words, and brackets are
+        // ordinary lyric characters. Only the line header is structural.
+        let content = &line[header_end + 1..];
         let mut words = Vec::new();
-        let mut rest = content;
-        while let Some(open) = rest.find('(') {
-            let text = rest[..open].to_string();
-            let Some(close) = rest[open..].find(')') else { break };
-            let inside = &rest[open + 1..open + close];
+        let mut cursor = 0;
+        let mut segment_start = 0;
+        while let Some(relative_open) = content[cursor..].find('(') {
+            let open = cursor + relative_open;
+            let Some(relative_close) = content[open..].find(')') else {
+                break;
+            };
+            let close = open + relative_close;
+            let inside = &content[open + 1..close];
             let mut parts = inside.split(',');
             let word_start = parts.next().and_then(|v| v.trim().parse::<i64>().ok());
             let word_duration = parts.next().and_then(|v| v.trim().parse::<i64>().ok());
-            if let (Some(word_start), Some(word_duration)) = (word_start, word_duration) {
+            if let (Some(word_start), Some(word_duration), true) =
+                (word_start, word_duration, parts.next().is_none())
+            {
+                let text = content[segment_start..open].to_string();
                 if !text.is_empty() {
                     words.push(QrcWord {
                         text,
@@ -473,8 +504,18 @@ pub fn parse(payload: &str) -> Vec<QrcLine> {
                         duration_ms: word_duration,
                     });
                 }
+                segment_start = close + 1;
+                cursor = segment_start;
+            } else {
+                // Parentheses are valid lyric text too. Keep scanning for the
+                // next numeric timing annotation without dropping this span.
+                cursor = open + 1;
             }
-            rest = &rest[open + close + 1..];
+        }
+        // Some QRC responses put punctuation/text after the last timing tag.
+        // Attach it to that final word so structured lyrics preserve the source.
+        if let Some(last) = words.last_mut() {
+            last.text.push_str(&content[segment_start..]);
         }
         if words.is_empty() {
             continue;
@@ -566,11 +607,17 @@ mod tests {
 
     #[test]
     fn a_hex_oddity_is_refused_rather_than_guessed() {
-        assert!(matches!(decrypt_hex("abc"), Err(QrcError::NotCiphertext(_))));
+        assert!(matches!(
+            decrypt_hex("abc"),
+            Err(QrcError::NotCiphertext(_))
+        ));
         assert!(matches!(decrypt_hex("zz"), Err(QrcError::NotCiphertext(_))));
         assert!(matches!(decrypt_hex(""), Err(QrcError::NotCiphertext(_))));
         // Right shape, but not a zlib stream once decrypted.
-        assert!(matches!(decrypt_hex("0011223344556677"), Err(QrcError::NotCompressed(_))));
+        assert!(matches!(
+            decrypt_hex("0011223344556677"),
+            Err(QrcError::NotCompressed(_))
+        ));
     }
 
     #[test]
@@ -612,7 +659,39 @@ mod tests {
     #[test]
     fn a_bracket_in_a_word_cannot_break_the_tag() {
         let lines = parse("[0,100]a[b(0,50)c]d(50,50)");
+        assert_eq!(lines[0].words[0].text, "a[b");
+        assert_eq!(lines[0].words[1].text, "c]d");
         let lrc = to_word_lrc(&lines);
         assert_eq!(lrc, "[00:00.00]ab[00:00.05]cd");
+    }
+
+    #[test]
+    fn structured_qrc_keeps_word_spaces_brackets_and_millisecond_timing() {
+        let lines =
+            parse("[190871,1984] [字](190871,361)[詞](191232,172) 尾(parenthetical)(1,2,3)");
+        assert_eq!(
+            lines,
+            vec![QrcLine {
+                start_ms: 190871,
+                duration_ms: 1984,
+                words: vec![
+                    QrcWord {
+                        text: " [字]".into(),
+                        start_ms: 190871,
+                        duration_ms: 361
+                    },
+                    QrcWord {
+                        text: "[詞] 尾(parenthetical)(1,2,3)".into(),
+                        start_ms: 191232,
+                        duration_ms: 172
+                    },
+                ],
+            }]
+        );
+        let wire = serde_json::to_value(&lines).unwrap();
+        assert_eq!(wire[0]["startMs"], 190871);
+        assert_eq!(wire[0]["durationMs"], 1984);
+        assert_eq!(wire[0]["words"][0]["text"], " [字]");
+        assert_eq!(wire[0]["words"][1]["durationMs"], 172);
     }
 }

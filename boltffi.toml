@@ -56,7 +56,7 @@ enabled = false
 [targets.android.pack]
 
 [targets.android.link]
-extra_args = []
+extra_args = ["-Wl,-z,max-page-size=16384"]
 
 [targets.android.debug_symbols]
 enabled = false

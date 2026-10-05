@@ -19,7 +19,10 @@ use std::path::{Path, PathBuf};
 pub fn hash33_seeded(key: &str, seed: u32) -> u32 {
     let mut hash: u32 = seed;
     for ch in key.chars() {
-        hash = hash.wrapping_shl(5).wrapping_add(hash).wrapping_add(ch as u32);
+        hash = hash
+            .wrapping_shl(5)
+            .wrapping_add(hash)
+            .wrapping_add(ch as u32);
     }
     hash & 0x7FFF_FFFF
 }
@@ -119,7 +122,9 @@ impl CredentialStore {
     /// is the external directory the app prefers, or this binary's own folder.
     pub fn for_directory(helper_dir: &Path) -> Self {
         Self {
-            path: helper_dir.join("Credential").join("qqmusic-credential.json"),
+            path: helper_dir
+                .join("Credential")
+                .join("qqmusic-credential.json"),
         }
     }
 
@@ -192,7 +197,9 @@ pub fn credential_from_cookies(cookies: &Value) -> Option<Credential> {
     Some(Credential {
         music_id,
         music_key,
-        encrypted_uin: get("encrypt_uin").unwrap_or_default(),
+        encrypted_uin: get("encrypt_uin")
+            .or_else(|| get("encryptUin"))
+            .unwrap_or_default(),
         raw: json!({}),
     })
 }
@@ -205,7 +212,10 @@ mod tests {
     #[test]
     fn the_seed_changes_the_hash() {
         // The lesson that cost a round of 403s: these two are different numbers.
-        assert_ne!(hash33_seeded("qrsig-value", 0), hash33_seeded("qrsig-value", 5381));
+        assert_ne!(
+            hash33_seeded("qrsig-value", 0),
+            hash33_seeded("qrsig-value", 5381)
+        );
         assert_eq!(hash33("k"), hash33_seeded("k", 5381));
     }
 

@@ -18,7 +18,10 @@ use std::sync::OnceLock;
 
 fn upstream() -> &'static Upstream {
     static INSTANCE: OnceLock<Upstream> = OnceLock::new();
-    INSTANCE.get_or_init(Upstream::new)
+    INSTANCE.get_or_init(|| {
+        crate::freeze_configuration();
+        Upstream::new()
+    })
 }
 
 /// The same shared upstream, for the port modules' typed wrappers.
@@ -30,6 +33,7 @@ pub(crate) fn shared_upstream() -> &'static Upstream {
 }
 
 fn store() -> CredentialStore {
+    crate::freeze_configuration();
     CredentialStore::for_directory(&data_directory())
 }
 
@@ -40,8 +44,9 @@ fn call<T: serde::de::DeserializeOwned>(method: &str, params: Value) -> Result<T
 
 /// Keep the protocol envelope intact for callers requesting raw JSON.
 fn dispatch_payload(method: &str, params: &Value) -> Result<Value, HelperError> {
+    let upstream = upstream();
     let credential = store().load();
-    methods::dispatch(upstream(), credential.as_ref(), method, params).map_err(HelperError::from)
+    methods::dispatch(upstream, credential.as_ref(), method, params).map_err(HelperError::from)
 }
 
 /// Adapt the protocol's explicit envelopes to the public typed return values.
@@ -155,6 +160,26 @@ pub fn import_credential(uin: String, qm_keyst: String) -> Result<(), HelperErro
         .map_err(|error| HelperError::InvalidRequest(error.to_string()))
 }
 
+/// Import the same login with an optional encrypted UIN for account relations.
+/// Kept separate so the existing two-argument macOS API remains source-compatible.
+#[export]
+pub fn import_credential_with_encrypt_uin(
+    uin: String,
+    qm_keyst: String,
+    encrypt_uin: Option<String>,
+) -> Result<(), HelperError> {
+    let mut credential: Credential = methods::credential_from_params(&json!({
+        "cookies": { "uin": uin, "qm_keyst": qm_keyst }
+    }))
+    .map_err(HelperError::from)?;
+    credential.encrypted_uin = encrypt_uin
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_default();
+    store()
+        .store(&credential)
+        .map_err(|error| HelperError::InvalidRequest(error.to_string()))
+}
+
 /// Forget the stored login.
 #[export]
 pub fn logout() -> Result<(), HelperError> {
@@ -179,6 +204,33 @@ pub fn playlist_tracks(
     call(
         "fetch_playlist_tracks",
         json!({ "songlistId": list_id, "offset": offset, "limit": limit }),
+    )
+}
+
+/// A row-offset page of playlist or liked-folder tracks, with the source total.
+/// `dir_id=201` and `list_id=0` addresses the reserved 我喜欢 folder.
+#[export]
+pub fn playlist_tracks_page(
+    list_id: i64,
+    dir_id: Option<i64>,
+    offset: u32,
+    limit: u32,
+) -> Result<crate::models::TrackPage, HelperError> {
+    call(
+        "fetch_playlist_tracks_page",
+        json!({ "listId": list_id, "dirId": dir_id, "offset": offset, "limit": limit }),
+    )
+}
+
+/// Add or remove a song by numeric id and retain the upstream result code.
+#[export]
+pub fn set_liked_by_id(
+    song_id: i64,
+    liked: bool,
+) -> Result<crate::models::LikeReceipt, HelperError> {
+    call(
+        "set_liked_by_id",
+        json!({ "songId": song_id, "liked": liked }),
     )
 }
 
@@ -278,9 +330,13 @@ mod tests {
                 parse(json!({"tracks":[track()],"total":99}), method).unwrap();
             assert_eq!(tracks[0].song_mid, "SONG", "{method}");
         }
-        let page: crate::models::TrackPage =
-            parse(json!({"tracks":[track()],"total":99}), "fetch_album_tracks").unwrap();
+        let page: crate::models::TrackPage = parse(
+            json!({"tracks":[track()],"total":99,"nextOffset":203}),
+            "fetch_album_tracks",
+        )
+        .unwrap();
         assert_eq!(page.total, Some(99));
+        assert_eq!(page.next_offset, Some(203));
         let search: crate::models::TrackSearch =
             parse(json!({"tracks":[track()],"total":75}), "search_songs").unwrap();
         assert_eq!(search.total, 75);
@@ -343,7 +399,9 @@ mod tests {
     fn lyric_merges_word_track_and_stream_retains_playability() {
         let lyric: crate::models::Lyric = parse(
             json!({"lyric":{
-            "lyric":"[00:01]原文","translation":"译文","romanization":"roma"
+            "lyric":"[00:01]原文","translation":"译文","romanization":"roma",
+            "qrcLines":[{"startMs":1000,"durationMs":500,"words":[{"text":"原","startMs":1000,"durationMs":250}]}],
+            "romanLines":[{"startMs":1000,"durationMs":500,"words":[{"text":"yuan","startMs":1000,"durationMs":500}]}]
         },"wordLyric":"word track"}),
             "fetch_lyric",
         )
@@ -351,6 +409,12 @@ mod tests {
         assert_eq!(lyric.lyric.as_deref(), Some("[00:01]原文"));
         assert_eq!(lyric.translation.as_deref(), Some("译文"));
         assert_eq!(lyric.word_lyric.as_deref(), Some("word track"));
+        assert_eq!(lyric.qrc_lines.as_ref().unwrap()[0].words[0].text, "原");
+        assert_eq!(
+            lyric.qrc_lines.as_ref().unwrap()[0].words[0].duration_ms,
+            250
+        );
+        assert_eq!(lyric.roman_lines.as_ref().unwrap()[0].words[0].text, "yuan");
         let lyric: crate::models::Lyric = parse(
             json!({"lyric":{"lyric":null},"wordLyric":null}),
             "fetch_lyric",
@@ -511,6 +575,7 @@ mod tests {
             ("get_login_status", "login_status"),
             ("fetch_liked_songs", "liked_songs"),
             ("fetch_playlist_tracks", "playlist_tracks"),
+            ("fetch_playlist_tracks_page", "playlist_tracks_page"),
             ("fetch_user_playlists", "user_playlists"),
             ("fetch_liked_albums", "liked_albums"),
             ("fetch_followed_artists", "followed_artists"),
@@ -518,7 +583,9 @@ mod tests {
             ("fetch_album_detail", "album_detail"),
             ("fetch_album_tracks", "album_tracks"),
             ("fetch_artist_songs", "artist_songs"),
+            ("fetch_artist_songs_page", "artist_songs_page"),
             ("fetch_artist_albums", "artist_albums"),
+            ("fetch_artist_albums_page", "artist_albums_page"),
             ("fetch_artist_detail", "artist_detail"),
             ("fetch_artist_biography", "fetch_artist_biography"),
             ("search_track_artwork", "search_track_artwork"),
@@ -528,10 +595,12 @@ mod tests {
             ("fetch_toplist_tracks", "toplist_tracks"),
             ("fetch_radio_stations", "radio_stations"),
             ("fetch_radio_tracks", "radio_tracks"),
+            ("fetch_radio_track_batch", "radio_track_batch"),
             ("fetch_new_songs", "new_songs"),
             ("fetch_recommend_feed", "recommend_feed"),
             ("fetch_lyric", "lyric"),
             ("resolve_song_url", "resolve_song_url"),
+            ("set_liked_by_id", "set_liked_by_id"),
             ("search_songs", "search_songs"),
             ("search_artists", "search_artists"),
             ("search_albums", "search_albums"),
@@ -604,6 +673,20 @@ pub fn artist_songs(
     )
 }
 
+/// An artist's globally ordered, row-offset song page with the source total.
+#[export]
+pub fn artist_songs_page(
+    singer_mid: String,
+    sort: String,
+    offset: u32,
+    limit: u32,
+) -> Result<crate::models::TrackPage, HelperError> {
+    call(
+        "fetch_artist_songs_page",
+        json!({ "singerMid": singer_mid, "sort": sort, "offset": offset, "limit": limit }),
+    )
+}
+
 /// An artist's albums, same two sorts.
 #[export]
 pub fn artist_albums(
@@ -615,6 +698,20 @@ pub fn artist_albums(
     call(
         "fetch_artist_albums",
         json!({ "singerMid": singer_mid, "sort": sort, "page": page, "limit": limit }),
+    )
+}
+
+/// An artist's globally ordered album page, with total and song counts.
+#[export]
+pub fn artist_albums_page(
+    singer_mid: String,
+    sort: String,
+    offset: u32,
+    limit: u32,
+) -> Result<crate::models::AlbumPage, HelperError> {
+    call(
+        "fetch_artist_albums_page",
+        json!({ "singerMid": singer_mid, "sort": sort, "offset": offset, "limit": limit }),
     )
 }
 
@@ -661,6 +758,18 @@ pub fn radio_tracks(
     call(
         "fetch_radio_tracks",
         json!({ "stationId": station_id, "limit": limit, "firstPlay": first_play }),
+    )
+}
+
+/// Fetch one fresh batch from a QQ Music infinite radio rotation.
+#[export]
+pub fn radio_track_batch(
+    station_id: i64,
+    first_play: bool,
+) -> Result<crate::models::TrackPage, HelperError> {
+    call(
+        "fetch_radio_track_batch",
+        json!({ "stationId": station_id, "firstPlay": first_play }),
     )
 }
 

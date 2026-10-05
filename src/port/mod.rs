@@ -101,14 +101,10 @@ pub fn call<T: serde::de::DeserializeOwned>(
     method: &str,
     params: Value,
 ) -> Result<T, crate::HelperError> {
+    let upstream = crate::api::shared_upstream();
     let credential = crate::CredentialStore::for_directory(&crate::data_directory()).load();
-    let value = crate::methods::dispatch(
-        crate::api::shared_upstream(),
-        credential.as_ref(),
-        method,
-        &params,
-    )
-    .map_err(crate::HelperError::from)?;
+    let value = crate::methods::dispatch(upstream, credential.as_ref(), method, &params)
+        .map_err(crate::HelperError::from)?;
     serde_json::from_value(value).map_err(|error| crate::HelperError::Upstream(error.to_string()))
 }
 

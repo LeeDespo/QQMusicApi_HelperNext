@@ -19,7 +19,7 @@ use crate::upstream::{
 };
 use serde_json::{json, Value};
 
-pub const COMPONENT_VERSION: &str = "0.1.0";
+pub const COMPONENT_VERSION: &str = "0.2.0";
 /// The protocol the app speaks; unchanged from the Python helper.
 pub const PROTOCOL_VERSION: i32 = 2;
 /// The library the old helper shipped, reported so both components answer
@@ -38,6 +38,7 @@ pub const METHODS: &[&str] = &[
     "fetch_user_playlists",
     "fetch_followed_artists",
     "fetch_playlist_tracks",
+    "fetch_playlist_tracks_page",
     "get_status",
     "set_rate_limit",
     "set_breaker",
@@ -55,13 +56,16 @@ pub const METHODS: &[&str] = &[
     "fetch_album_detail",
     "fetch_album_tracks",
     "fetch_artist_songs",
+    "fetch_artist_songs_page",
     "fetch_artist_albums",
+    "fetch_artist_albums_page",
     "fetch_artist_detail",
     // Rankings, radio, new songs and the recommendation feed.
     "fetch_toplist_categories",
     "fetch_toplist_tracks",
     "fetch_radio_stations",
     "fetch_radio_tracks",
+    "fetch_radio_track_batch",
     "fetch_new_songs",
     "fetch_recommend_feed",
     // Lyrics and playback urls.
@@ -69,6 +73,7 @@ pub const METHODS: &[&str] = &[
     "resolve_song_url",
     // The one write.
     "set_liked",
+    "set_liked_by_id",
     // The local library's enrichment (cover matching, artist biography).
     "search_track_artwork",
     "search_artist_artwork",
@@ -105,7 +110,7 @@ fn catalog_dispatch(
     // that make them work at all.
     let platform = if matches!(
         method,
-        "fetch_artist_detail" | "fetch_recommend_feed" | "set_liked" | "search_songs"
+        "fetch_artist_detail" | "fetch_recommend_feed" | "set_liked" | "set_liked_by_id" | "search_songs"
             | "search_artists" | "search_albums" | "search_playlists"
             // The enrichment calls search underneath, so they need the same
             // profile — and the biography reads the artist header.
@@ -162,7 +167,29 @@ fn catalog_dispatch(
             int("offset").unwrap_or(0),
             round(int("limit"), 200, 1, 200),
         )
-        .map(|(tracks, total)| json!({ "tracks": tracks, "total": total })),
+        .map(|(tracks, total, next_offset)| {
+            json!({ "tracks": tracks, "total": total, "nextOffset": next_offset })
+        }),
+        "fetch_artist_songs_page" => crate::catalog::artist_songs_page(
+            upstream,
+            credential,
+            platform,
+            &text("singerMid"),
+            &first_text(params, &["sort"]).unwrap_or_else(|| "hot".into()),
+            int("offset").unwrap_or(0),
+            round(int("limit"), 100, 1, 100),
+        )
+        .map(|(tracks, total, next_offset)| json!({ "tracks": tracks, "total": total, "nextOffset": next_offset })),
+        "fetch_artist_albums_page" => crate::catalog::artist_albums_page(
+            upstream,
+            credential,
+            platform,
+            &text("singerMid"),
+            &first_text(params, &["sort"]).unwrap_or_else(|| "hot".into()),
+            int("offset").unwrap_or(0),
+            round(int("limit"), 30, 1, 100),
+        )
+        .map(|(albums, total)| json!({ "albums": albums, "total": total })),
         "fetch_artist_songs" => crate::catalog::artist_songs(
             upstream,
             credential,
@@ -220,6 +247,17 @@ fn catalog_dispatch(
                 .unwrap_or(true),
         )
         .map(|tracks| json!({ "tracks": tracks })),
+        "fetch_radio_track_batch" => crate::catalog::radio_track_batch(
+            upstream,
+            credential,
+            platform,
+            int("stationId").unwrap_or(0),
+            params
+                .get("firstPlay")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        )
+        .map(|tracks| json!({ "tracks": tracks, "total": null })),
         "fetch_new_songs" => crate::catalog::new_songs(
             upstream,
             credential,
@@ -263,12 +301,31 @@ fn catalog_dispatch(
                     want_translation,
                 )
                 .map(|mut plain| {
-                    // The encrypted route's translation is the one that actually
-                    // carries text; the plaintext route leaves it empty.
-                    if let Some(translation) = encrypted.translation {
-                        if let Some(object) = plain.as_object_mut() {
+                    // Prefer decoded encrypted-route fields when present. QRC
+                    // timing is additive; wordLyric remains the old LRC contract.
+                    if let Some(object) = plain.as_object_mut() {
+                        if let Some(translation) = encrypted.translation {
                             object.insert("translation".into(), json!(translation));
                         }
+                        if let Some(romanization) = encrypted.romanization {
+                            object.insert("romanization".into(), json!(romanization));
+                        }
+                        object.insert(
+                            "qrcLines".into(),
+                            json!(if want_words {
+                                encrypted.qrc_lines
+                            } else {
+                                None
+                            }),
+                        );
+                        object.insert(
+                            "romanLines".into(),
+                            json!(if want_words {
+                                encrypted.roman_lines
+                            } else {
+                                None
+                            }),
+                        );
                     }
                     json!({
                         "lyric": plain,
@@ -360,6 +417,13 @@ fn catalog_dispatch(
             params.get("liked").and_then(Value::as_bool).unwrap_or(true),
         )
         .map(|result| json!({ "like": result })),
+        "set_liked_by_id" => crate::catalog::set_liked_by_id(
+            upstream,
+            credential,
+            Platform::Android,
+            int("songId").unwrap_or(0),
+            params.get("liked").and_then(Value::as_bool).unwrap_or(true),
+        ),
         "resolve_song_url" => crate::catalog::stream_url(
             upstream,
             credential,
@@ -492,9 +556,10 @@ pub fn dispatch(
         "fetch_followed_artists" => {
             Ok(json!({ "artists": followed_artists(upstream, &account, params)? }))
         }
-        "fetch_playlist_tracks" => {
-            let (tracks, total) = playlist_tracks(upstream, &account, params)?;
-            Ok(json!({ "tracks": tracks, "total": total }))
+        "fetch_playlist_tracks" | "fetch_playlist_tracks_page" => {
+            let (tracks, total, next_offset) =
+                playlist_tracks(upstream, &account, platform, params)?;
+            Ok(json!({ "tracks": tracks, "total": total, "nextOffset": next_offset }))
         }
         other => Err(UpstreamError::Upstream(format!("不支持的方法：{other}"))),
     }
@@ -756,11 +821,14 @@ fn liked_songs(
 fn playlist_tracks(
     upstream: &Upstream,
     credential: &Credential,
+    platform: Platform,
     params: &Value,
-) -> Result<(Vec<Value>, Option<i64>), UpstreamError> {
+) -> Result<(Vec<Value>, Option<i64>, Option<i64>), UpstreamError> {
     require_login(credential)?;
-    let disstid = first_int(params, &["songlistId", "disstid", "id"])
+    let dir_id = first_int(params, &["dirId", "dirid"]).unwrap_or(0);
+    let disstid = first_int(params, &["listId", "songlistId", "disstid", "id"])
         .or_else(|| first_int(params, &["topId"]))
+        .or_else(|| (dir_id == LIKED_SONGS_DIRID).then_some(0))
         .ok_or_else(|| UpstreamError::Upstream("缺少 songlistId".into()))?;
     let limit = first_int(params, &["limit"]).unwrap_or(100).clamp(1, 200);
     // The app asks for a *page*; `song_begin` is an offset. An explicit offset
@@ -770,15 +838,16 @@ fn playlist_tracks(
         Some(explicit) => explicit.max(0),
         None => (first_int(params, &["page"]).unwrap_or(1).max(1) - 1) * limit,
     };
-    let data = upstream.call(
+    let data = upstream.call_with(
         credential,
         Class::Account,
+        platform,
         Call {
             module: "music.srfDissInfo.DissInfo",
             method: "CgiGetDiss",
             param: json!({
                 "disstid": disstid,
-                "dirid": 0,
+                "dirid": dir_id,
                 "tag": true,
                 "song_begin": offset,
                 "song_num": limit,
@@ -792,7 +861,32 @@ fn playlist_tracks(
     let total = first_object(&data, &["dirinfo"])
         .and_then(|info| first_int(info, &["songnum", "song_num", "total"]))
         .or_else(|| first_int(&data, &["total_song_num", "songnum"]));
-    Ok((decoded_tracks(&data), total))
+    let received = raw_track_row_count(&data);
+    let next_offset = next_track_offset(offset, received);
+    Ok((decoded_tracks(&data), total, Some(next_offset)))
+}
+
+pub(crate) fn next_track_offset(offset: i64, received_rows: usize) -> i64 {
+    offset.saturating_add(received_rows.min(i64::MAX as usize) as i64)
+}
+
+/// Count upstream rows before `decode_track` filters malformed/no-mid items.
+/// Pagination offsets describe consumed source rows, not only displayable songs.
+pub(crate) fn raw_track_row_count(data: &Value) -> usize {
+    first_array(
+        data,
+        &[
+            "songlist",
+            "songList",
+            "songs",
+            "list",
+            "tracks",
+            "track_list",
+            "songInfoList",
+        ],
+    )
+    .map(Vec::len)
+    .unwrap_or(0)
 }
 
 /// The account's own playlists (created and favorited), through the legacy fcgi.
@@ -953,17 +1047,17 @@ pub fn decoded_tracks(data: &Value) -> Vec<Value> {
     items.iter().filter_map(decode_track).collect()
 }
 
-fn decode_track(item: &Value) -> Option<Value> {
+pub(crate) fn decode_track(item: &Value) -> Option<Value> {
     let track = first_object(item, &["track", "song", "songInfo"]).unwrap_or(item);
     let song_mid = first_text(track, &["mid", "songMid", "songmid"])?;
     let album = first_object(track, &["album", "albumInfo"]);
     let album_mid = album.and_then(|album| first_text(album, &["mid", "albumMid", "albummid"]));
-    let singers: Vec<Value> = first_array(track, &["singer"])
+    let singers: Vec<Value> = first_array(track, &["singer", "singers"])
         .cloned()
         .unwrap_or_default()
         .iter()
         .filter_map(|singer| {
-            let mid = first_text(singer, &["mid"]);
+            let mid = first_text(singer, &["mid", "singerMid", "singerMID"]);
             let name = first_text(singer, &["name"]);
             if mid.is_none() && name.is_none() {
                 return None;
@@ -971,21 +1065,51 @@ fn decode_track(item: &Value) -> Option<Value> {
             Some(json!({ "mid": mid, "name": name }))
         })
         .collect();
-    let artist = singers
+    let artist_names: Vec<String> = singers
         .iter()
         .filter_map(|singer| singer.get("name").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join(", ");
+        .map(str::to_string)
+        .collect();
+    let artist = if !artist_names.is_empty() {
+        artist_names.join(", ")
+    } else {
+        first_text(track, &["singer", "singername", "singerName"]).unwrap_or_default()
+    };
     let pay = first_object(track, &["pay", "payInfo"]);
     let pay_play = pay
         .and_then(|pay| first_int(pay, &["pay_play", "payPlay"]))
         .or_else(|| first_int(track, &["pay_play", "payPlay"]));
+    let file = first_object(track, &["file", "fileInfo"]);
+    let file_sizes: Vec<Value> = file
+        .and_then(Value::as_object)
+        .map(|file| {
+            file.iter()
+                .filter_map(|(key, value)| {
+                    let name = key.strip_prefix("size_")?;
+                    let bytes = match value {
+                        Value::Number(number) => number.as_i64(),
+                        Value::String(text) => text.parse::<i64>().ok(),
+                        _ => None,
+                    }?;
+                    (bytes > 0).then(|| json!({ "name": name, "bytes": bytes }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let media_mid = file
+        .and_then(|file| first_text(file, &["media_mid", "mediaMid"]))
+        .or_else(|| first_text(track, &["media_mid", "mediaMid"]));
+    let singer_mid = singers
+        .first()
+        .and_then(|singer| singer.get("mid").and_then(Value::as_str))
+        .map(str::to_string)
+        .or_else(|| first_text(track, &["singerMid", "singer_mid"]));
 
     Some(json!({
         "source": "qqmusic",
         "songId": first_int(track, &["id", "songId", "songid"]),
         "songMid": song_mid,
-        "mediaMid": first_int(track, &["media_mid"]).map(|_| ()).and(first_text(track, &["media_mid", "mediaMid"])),
+        "mediaMid": media_mid,
         "title": first_text(track, &["name", "title", "songname"]).unwrap_or_else(|| "未知歌曲".into()),
         "artist": if artist.is_empty() { "未知艺人".to_string() } else { artist },
         "album": album.and_then(|album| first_text(album, &["name", "albumName"])),
@@ -994,8 +1118,10 @@ fn decode_track(item: &Value) -> Option<Value> {
         "imageURL": normalized_artwork_url(album_mid.as_deref().map(album_cover_url).as_deref()),
         "duration": first_int(track, &["interval", "duration"]),
         "payPlay": pay_play,
-        "singerMid": singers.first().and_then(|singer| singer.get("mid").and_then(Value::as_str)),
+        "singerMid": singer_mid,
         "singers": singers,
+        "genre": first_int(track, &["genre", "genreId", "genre_id"]),
+        "fileSizes": file_sizes,
     }))
 }
 
@@ -1128,6 +1254,34 @@ mod tests {
             track["imageURL"],
             "https://y.gtimg.cn/music/photo_new/T002R800x800M000album-mid.jpg"
         );
+    }
+
+    #[test]
+    fn playlist_offsets_advance_by_source_rows_even_when_a_row_is_dropped() {
+        let source = json!({
+            "songlist": [
+                {"mid":"song-1","name":"可解码"},
+                {"name":"无 mid，解码时省略"},
+                {"mid":"song-3","name":"可解码"}
+            ]
+        });
+        assert_eq!(decoded_tracks(&source).len(), 2);
+        assert_eq!(raw_track_row_count(&source), 3);
+        assert_eq!(next_track_offset(200, raw_track_row_count(&source)), 203);
+    }
+
+    #[test]
+    fn album_offsets_advance_by_song_list_rows_even_when_a_row_is_dropped() {
+        let source = json!({
+            "songList": [
+                {"mid":"song-1","name":"可解码"},
+                {"name":"无 mid，解码时省略"},
+                {"mid":"song-3","name":"可解码"}
+            ]
+        });
+        assert_eq!(decoded_tracks(&source).len(), 2);
+        assert_eq!(raw_track_row_count(&source), 3);
+        assert_eq!(next_track_offset(12, raw_track_row_count(&source)), 15);
     }
 
     #[test]

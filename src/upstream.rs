@@ -321,8 +321,7 @@ impl Upstream {
         platform: Platform,
         call: Call,
     ) -> Result<Value, UpstreamError> {
-        let envelope = self.envelope(credential, platform, vec![call])?;
-        let response = self.post_json(credential, class, MUSICU_ENDPOINT, &envelope, &[])?;
+        let response = self.call_many_with(credential, class, platform, vec![call])?;
         let slot = response
             .get("req_0")
             .ok_or_else(|| UpstreamError::Upstream("响应里没有 req_0".into()))?;
@@ -343,6 +342,23 @@ impl Upstream {
                 slot.get("msg").and_then(Value::as_str).unwrap_or("")
             ))),
         }
+    }
+
+    /// Run several related musicu calls in one HTTP request and return their
+    /// response slots intact. Used for singer-album song-count enrichment and
+    /// explicit write receipts that need the upstream business code.
+    pub(crate) fn call_many_with(
+        &self,
+        credential: &Credential,
+        class: Class,
+        platform: Platform,
+        calls: Vec<Call>,
+    ) -> Result<Value, UpstreamError> {
+        if calls.is_empty() {
+            return Ok(json!({}));
+        }
+        let envelope = self.envelope(credential, platform, calls)?;
+        self.post_json(credential, class, MUSICU_ENDPOINT, &envelope, &[])
     }
 
     /// The account's own asset list (`reqtype` 2 = albums, 3 = playlists).

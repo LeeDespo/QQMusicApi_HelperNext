@@ -380,7 +380,11 @@ mod tests {
         for _ in 0..Class::Write.budget() {
             limiter.acquire(Class::Write);
         }
-        assert!(started.elapsed() < Duration::from_millis(40), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() < Duration::from_millis(40),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
@@ -393,7 +397,10 @@ mod tests {
             open_for: Duration::from_secs(30),
         });
         breaker.record_failure();
-        assert!(breaker.check().is_none(), "one failure is under a threshold of two");
+        assert!(
+            breaker.check().is_none(),
+            "one failure is under a threshold of two"
+        );
         breaker.record_failure();
         assert!(breaker.check().is_some(), "the second must open it");
     }
@@ -406,16 +413,25 @@ mod tests {
         breaker.record_failure();
         breaker.record_failure();
         breaker.record_failure();
-        assert!(breaker.check().is_some(), "five failures open the default breaker");
+        assert!(
+            breaker.check().is_some(),
+            "five failures open the default breaker"
+        );
         breaker.configure(BreakerConfig {
             enabled: false,
             ..BreakerConfig::default()
         });
-        assert!(breaker.check().is_none(), "disabling must take effect at once");
+        assert!(
+            breaker.check().is_none(),
+            "disabling must take effect at once"
+        );
         for _ in 0..20 {
             breaker.record_failure();
         }
-        assert!(breaker.check().is_none(), "and no later failure may reopen it");
+        assert!(
+            breaker.check().is_none(),
+            "and no later failure may reopen it"
+        );
     }
 
     #[test]

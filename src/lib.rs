@@ -37,29 +37,30 @@
 
 mod aria2;
 mod catalog;
-pub mod port;
-pub mod qrc;
 pub mod device;
 mod guard;
 pub mod login;
 pub mod methods;
+pub mod port;
+pub mod qrc;
 mod upstream;
 
 pub mod api;
 pub mod credential;
 pub mod models;
 
-pub use guard::{BreakerState, Class};
-pub use upstream::Platform;
-pub use credential::CredentialStore;
-pub use upstream::{Upstream, UpstreamError};
 pub use aria2::{Aria2, Aria2Options};
+pub use credential::CredentialStore;
+pub use guard::{BreakerState, Class};
 pub use methods::{COMPONENT_VERSION, PROTOCOL_VERSION};
 pub use models::*;
+pub use upstream::Platform;
+pub use upstream::{Upstream, UpstreamError};
 
-use boltffi::data;
+use boltffi::{data, export};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 /// Everything the component needs to know about its host.
 #[derive(Debug, Clone)]
@@ -74,6 +75,17 @@ pub struct Configuration {
 }
 
 static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
+static CONFIGURATION_LOCK: Mutex<()> = Mutex::new(());
+static CONFIGURATION_FROZEN: AtomicBool = AtomicBool::new(false);
+
+/// Freeze host configuration before a component API reads shared storage or
+/// constructs the process-wide Upstream.
+pub(crate) fn freeze_configuration() {
+    let _guard = CONFIGURATION_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    CONFIGURATION_FROZEN.store(true, Ordering::Release);
+}
 
 /// The platform profile calls use by default: the host's choice, or the web
 /// profile when none was configured.
@@ -87,7 +99,55 @@ pub fn default_platform() -> Platform {
 /// Set the host's configuration. The first call wins, deliberately: a second
 /// caller cannot move the credential directory out from under a running session.
 pub fn configure(configuration: Configuration) {
+    let _guard = CONFIGURATION_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if CONFIGURATION_FROZEN.load(Ordering::Acquire) {
+        return;
+    }
     let _ = CONFIGURATION.set(configuration);
+}
+
+/// Initialize the component for a host before its first API call.
+///
+/// Repeating the same configuration is safe. A conflicting configuration, or
+/// first-time configuration after any component API has started, is an explicit
+/// error because its stores may already have captured the original directory.
+#[export]
+pub fn initialize(data_dir: String, platform: String) -> Result<(), HelperError> {
+    if data_dir.is_empty() {
+        return Err(HelperError::InvalidRequest("data_dir 不能为空".into()));
+    }
+    let default_platform = Platform::parse(&platform).ok_or_else(|| {
+        HelperError::InvalidRequest(format!(
+            "不支持的平台档案：{platform}（请用 web 或 android）"
+        ))
+    })?;
+    let requested = Configuration {
+        data_dir,
+        default_platform,
+    };
+    let _guard = CONFIGURATION_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(current) = CONFIGURATION.get() {
+        if current.data_dir == requested.data_dir
+            && current.default_platform == requested.default_platform
+        {
+            return Ok(());
+        }
+        return Err(HelperError::InvalidRequest(
+            "HelperNext 已使用不同的数据目录或平台档案初始化".into(),
+        ));
+    }
+    if CONFIGURATION_FROZEN.load(Ordering::Acquire) {
+        return Err(HelperError::InvalidRequest(
+            "必须在首次调用 HelperNext API 前初始化 data_dir 与 platform".into(),
+        ));
+    }
+    CONFIGURATION
+        .set(requested)
+        .map_err(|_| HelperError::InvalidRequest("HelperNext 初始化竞争失败".into()))
 }
 
 /// The credential directory in force. Public because a host that passes its own
@@ -143,9 +203,8 @@ impl From<upstream::UpstreamError> for HelperError {
     fn from(error: upstream::UpstreamError) -> Self {
         match error {
             upstream::UpstreamError::Refused(reason) => HelperError::Throttled(reason),
-            upstream::UpstreamError::Transport(detail) | upstream::UpstreamError::Upstream(detail) => {
-                HelperError::Upstream(detail)
-            }
+            upstream::UpstreamError::Transport(detail)
+            | upstream::UpstreamError::Upstream(detail) => HelperError::Upstream(detail),
         }
     }
 }
@@ -166,9 +225,10 @@ mod tests {
         });
         assert_eq!(data_directory().to_string_lossy(), "/tmp/helper-next-first");
         assert_eq!(default_platform(), Platform::Android, "first call wins");
+        assert!(initialize("/tmp/helper-next-first".into(), "android".into()).is_ok());
+        assert!(initialize("/tmp/helper-next-second".into(), "web".into()).is_err());
     }
 }
-
 
 #[cfg(test)]
 mod qrc_vector_check {
@@ -177,12 +237,22 @@ mod qrc_vector_check {
         let hex = include_str!("qrc_vector_tmp.hex").trim();
         let document = crate::qrc::decrypt_hex(hex).expect("decrypts");
         // JS `.length` counts UTF-16 units; Rust counts bytes. CJK makes them differ.
-        assert_eq!(document.chars().count(), 7188, "length the reference records");
+        assert_eq!(
+            document.chars().count(),
+            7188,
+            "length the reference records"
+        );
         assert!(document.contains("<QrcInfos>"));
         assert!(document.contains("<LyricInfo LyricCount=\"1\">"));
         let payload = crate::qrc::extract_payload(&document).expect("payload");
         let lines = crate::qrc::parse(&payload);
         assert!(!lines.is_empty(), "words were found");
+        assert!(lines[0].duration_ms > 0, "source line duration is retained");
+        assert!(lines[0].words.iter().all(|word| word.duration_ms >= 0));
+        let structured = serde_json::to_value(&lines[0]).expect("structured QRC serializes");
+        assert!(structured.get("startMs").is_some());
+        assert!(structured.get("durationMs").is_some());
+        assert!(structured["words"][0].get("startMs").is_some());
         let lrc = crate::qrc::to_word_lrc(&lines);
         println!("---\n{l}\n---", l = &lrc[..lrc.len().min(400)]);
     }

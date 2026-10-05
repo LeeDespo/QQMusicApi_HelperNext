@@ -21,14 +21,14 @@
 - **web 档案** —— 账号列表（我喜欢 / 我的歌单 / 收藏专辑 / 关注歌手）、曲库详情、榜单、电台、新歌；
   移植层里的评论、MV、账号资产与关系、集合写入、推荐扩展也是这一档（这些端点参考没标档案，跟随调用方给的档案，组件默认 Web）。
   用库默认档案请求账号列表会被拒（`10004`）。
-- **android 档案** —— 搜索、取流、既有 `set_liked`（收藏写）、推荐流、歌手资料与主页 Tab、封面匹配、
+- **android 档案** —— 搜索、取流、收藏写（`set_liked` / `set_liked_by_id`）、推荐流、歌手资料与主页 Tab、封面匹配、
   批量取流；两个搜索 CGI 端点（综合 / 类型搜索）按实测也走这里。
   这些接口要**设备身份**与**设备会话**，两者都在 android 那套 `comm` 里。
 
 ## 二、方法清单
 
 除非另有说明，每条都在真实账号上跑通过。移植层里只做过单测、没上真机的条目会在下文另注；
-写接口与需要扫码/手机号的接口只在单测层验证（见第五节的当前限制）。
+登录/扫码族始终未真机验证（见第五节的当前限制），写接口的真实账号验证范围见「已验证与剩余限制」。
 
 | 能力 | 方法 | 上游 module / method | 参数要点 | 关键回值 |
 |---|---|---|---|---|
@@ -41,7 +41,7 @@
 | 退出登录 | `logout` | — | — | 删除凭据文件 |
 | 扫码登录 | `start_login` / `poll_login` | `ssl.ptlogin2.qq.com` 五步握手 | `loginType` / `identifier` | `qrcode.imageBase64` / `event` |
 | 我喜欢 | `fetch_liked_songs` | `music.srfDissInfo.DissInfo` / `CgiGetDiss` | `dirid=201, song_begin, song_num` | 曲目在 `songlist`，总数在 `dirinfo.songnum` |
-| 歌单 / 排行榜曲目 | `fetch_playlist_tracks` | 同上 | `disstid=<id>` + `page` 或 `offset`，`song_num` | 同上 |
+| 歌单 / 排行榜曲目 | `fetch_playlist_tracks` / `fetch_playlist_tracks_page` | 同上 | `disstid=<id>` + `page` 或 `offset`，`song_num`；我喜欢传 `listId=0, dirId=201`（只给 `dirId=201` 也算） | `tracks` + `total` + `nextOffset`（两个变体都回）；`nextOffset` 按原始行数推进，不可解码行也占位 |
 | 排行榜分组 | `fetch_toplist_categories` | `music.musicToplist.Toplist` / `GetAll` | `{}` | 组内键名是 `toplist`（小写 l） |
 | 排行榜曲目 | `fetch_toplist_tracks` | `music.musicToplist.Toplist` / `GetDetail` | `topId, offset, num` | 曲目在 `songInfoList`，总数 `totalNum` |
 | 我的歌单 | `fetch_user_playlists` | 老 fcgi | `reqtype=3` | 无 `dissid` 的保留目录要跳过 |
@@ -51,17 +51,18 @@
 | 专辑详情 | `fetch_album_detail` | `music.musichallAlbum.AlbumInfoServer` / `GetAlbumDetail` | `albumMId` 或 `albumId`；也可只给名字 | — |
 | 歌手资料 | `fetch_artist_detail` | `music.UnifiedHomepage.UnifiedHomepageSrv` / `GetHomepageHeader` | `SingerMid`；也可只给名字 | 空壳资料报错，不伪装成「未知歌手」 |
 | 歌手简介 | `fetch_artist_biography` | `music.musichallSinger.SingerInfoInter` / `GetSingerDetail` | `singer_mids` 与数字 `1` 开关；主页资料另读 Header | 回答在 `artistDetail`，优先 `ex_info.desc` |
-| 专辑曲目 | `fetch_album_tracks` | `music.musichallAlbum.AlbumSongList` / `GetAlbumSongList` | `albumMid` 或 `albumId`, `begin`, `num` | 列表键是 `songList`（大写 L），总数在 `totalNum` |
-| 歌手歌曲 | `fetch_artist_songs` | `musichall.song_list_server` / `GetSingerSongList` | `singerMid, order=1, number, begin` | 「最新」由组件按 `time_public` 排序 |
-| 歌手专辑 | `fetch_artist_albums` | `music.musichallAlbum.AlbumListServer` / `GetAlbumList` | 同上 | `albumID`（大写 ID）是上游的拼写 |
+| 专辑曲目 | `fetch_album_tracks` | `music.musichallAlbum.AlbumSongList` / `GetAlbumSongList` | `albumMid` 或 `albumId`, `begin`, `num` | 列表键是 `songList`（大写 L），总数在 `totalNum`；`nextOffset` 按原始行数递增，即使某行被解码器过滤 |
+| 歌手歌曲 | `fetch_artist_songs` / `fetch_artist_songs_page` | `musichall.song_list_server` / `GetSingerSongList` | `singerMid`；`sort` 用 `hot`/`latest`（上游 `order=1/2`，未知值报错）；老方法给 `page, limit`，page 变体给 `offset, limit` | 全局排序由上游做，page 变体保留 `totalNum`；上游某些档案最少回 30 行，组件把原始窗口压到请求 `limit` 再解码并回 `nextOffset`（不可解码行也占位）；`releaseDate` 取自同条歌曲的专辑 |
+| 歌手专辑 | `fetch_artist_albums` / `fetch_artist_albums_page` | `music.musichallAlbum.AlbumListServer` / `GetAlbumList` | 同歌手歌曲（`sort`/`offset`/`limit`） | page 变体回 `albums` + `total`；`albumID`（大写 ID）是上游的拼写；列表缺失的专辑曲数按每批最多 30 张批量补齐 |
 | 电台分组 | `fetch_radio_stations` | `pf.radiosvr` / `GetRadiolist` | `uin` | — |
 | 电台曲目 | `fetch_radio_tracks` | `pf.radiosvr` / `GetRadiosonglist` | `id`, `num`, `firstPlay` | 电台是无穷列表 |
+| 电台轮播批次 | `fetch_radio_track_batch` | `mb_track_radio_svr` / `get_radio_track` | `stationId`, `firstPlay` | 返回 `{tracks,total:null}`；宿主用 `firstPlay=false` 拉下一批并自行去重 |
 | 新歌 | `fetch_new_songs` | `newsong.NewSongServer` / `get_new_song_info` | `type`（地区）, `num`, `start` | — |
 | 猜你喜欢 | `fetch_recommend_feed` | `music.radioProxy.MbTrackRadioSvr` / `get_radio_track` | `id=99, num, from, scene` | 需要设备会话 |
 | 歌词（整行） | `fetch_lyric` | 明文 fcgi | `songmid`, `nobase64=1` | `lyric` 是明文 LRC |
-| 歌词（逐字） | `fetch_lyric` 的 `wordLyric` | `music.musichallSong.PlayLyricInfo` / `GetPlayLyricInfo` | `crypt:1, qrc:1, trans:1, songMid` | `lyric`/`trans` 都变成本文 §五 的密文 |
-| 取流地址 | `resolve_song_url` | `music.vkey.GetVkey` / `UrlGetVkey` | `songmid`, `filename`, `guid` | 按音质阶梯探测；**必须 android 档案** |
-| 收藏 / 取消收藏 | `set_liked` | `music.musicasset.PlaylistDetailWrite` / `AddSonglist`·`DelSonglist` | `songMid`（组件解析数字 id）或 `songId`，`liked` | 移植前唯一的写操作；移植层另有集合写入一族 |
+| 歌词（逐字 / 音译） | `fetch_lyric` 的 `wordLyric`, `qrcLines`, `romanLines` | `music.musichallSong.PlayLyricInfo` / `GetPlayLyricInfo` | `crypt:1, qrc:1, roma:1, trans:1, songMid` | 明文、base64 与 hex QRC 都会解码；QRC 行/词保留原始毫秒，translation 的 `[kana:…]` 原样保留 |
+| 取流地址 | `resolve_song_url` | `music.vkey.GetVkey` / `UrlGetVkey` | `songmid`, `filename`（组件按音质档前缀拼）, `guid` | 六档阶梯 `flac → ogg320 → 320 → ogg192 → 128 → aac`；`quality` 指定单档（也收 `standard`/`hq`/`aac96` 等别名，未知档位报错而非退回整条阶梯）；**必须 android 档案**；成功与否都回逐档 `tierResults` `{quality,code,playable}` |
+| 收藏 / 取消收藏 | `set_liked` / `set_liked_by_id` | `music.musicasset.PlaylistDetailWrite` / `AddSonglist`·`DelSonglist` | `songMid` 或 `songId`，`liked` | `set_liked_by_id` 同时校验外层 `code` 与 `data.retCode`，返回 `{success,code,throttled}`；1000 标为限流 |
 | 搜索（四类） | `search_songs` / `search_artists` / `search_albums` / `search_playlists` | `music.search.SearchCgiService` / `DoSearchForQQMusicMobile` | `keyword, num_per_page, page_num, search_type` 0/1/2/3 | 结果在 `body.item_*`，总数 `meta.sum`；标题带 `<em>`，组件剥掉 |
 | 封面匹配（三件） | `search_track_artwork` / `search_artist_artwork` / `search_album_artwork` | 内部走搜索 | 名称字段 + `limit` | 候选 + 排名置信度 |
 
@@ -107,7 +108,7 @@
 | 账号资产 · 清空不喜欢歌曲 | `clear_dislike_songs` | 同上 / `CancelAllDislike` | 两步：先 `ISOnlyGetToken` 取 Token，再 `DelType=3`；**签名路**；需登录 | 第二步 `Retcode == 0` |
 | 账号关系 · 主页 | `fetch_user_homepage` | `music.UnifiedHomepage.UnifiedHomepageSrv` / `GetHomepageHeader` | `euin`（缺省凭据）；未登录时用占位凭证 | `Info.BaseInfo` 是形状锚点 |
 | 账号关系 · VIP | `fetch_vip_info` | `VipLogin.VipLoginInter` / `vip_login_base` | `{}`；需登录 | `identity` / `userinfo` |
-| 账号关系 · 关注的歌手 | `fetch_follow_singers` | `music.concern.RelationList` / `GetFollowSingerList` | `euin, page, num`（协议键 `HostUin`/`From`/`Size`）；需登录 | `List` 是形状锚点；`Total`/`HasMore` 原样回 |
+| 账号关系 · 关注的歌手 | `fetch_follow_singers` / `fetch_follow_singers_at_offset` | `music.concern.RelationList` / `GetFollowSingerList` | `euin, page, num` 或直接传 `offset, num`（协议键 `HostUin`/`From`/`Size`）；需登录；at_offset 变体按已加载行数发 `From` | `List` 是形状锚点；`Total`/`HasMore` 原样回 |
 | 账号关系 · 粉丝 | `fetch_fans` | 同上 / `GetFansList` | 同上 | 同上 |
 | 账号关系 · 好友 | `fetch_friends` | `music.homepage.Friendship` / `GetFriendList` | `page, num`（`Page = page-1`）；需登录 | `friends` + `hasMore` |
 | 账号关系 · 关注的人 | `fetch_followed_users` | `music.concern.RelationList` / `GetFollowUserList` | 同关注的歌手 | 同上 |
@@ -134,8 +135,9 @@
 
 ## 三、逐字歌词（QRC）
 
-QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1, qrc:1` 时，
-`lyric` 字段不再是 base64 的 LRC，而是 **hex 编码的密文**；`trans`（翻译）同样是密文。
+QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1, qrc:1, roma:1` 时，
+`lyric` 与 `roma` 通常是 **hex 编码的密文**。不同响应也可能直接给明文或 base64 文本，组件会验证并解码这些形状；
+`trans` 按普通文本解码，`[kana:…]` 元数据保留原样。
 明文 fcgi 路只有整行歌词，拿不到逐字——这就是过去没有逐字时间的原因。
 
 组件内部三步，互相独立：
@@ -144,8 +146,9 @@ QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1
    三重组合 `D(K3) → E(K2) → D(K1)`，解密后是带 UTF-8 BOM 的 zlib，解压得到 QRC 文档。
    规格移植自 MIT 的 [qrc-decoder](https://github.com/apoint123/qrc-decoder)。
 2. **取内容**——解出来的是一层 XML 壳，真正的歌词在一个属性（或 CDATA）里，实体转义过。
-3. **转格式**——QRC 文本是 `[行开始,行时长]词(词开始,词时长)…`；
-   组件把它转成 **LRC，但每个词前都带一个时间戳**：
+3. **解析与兼容**——QRC 文本是 `[行开始,行时长]词(词开始,词时长)…`；
+   `qrcLines`/`romanLines` 返回逐行、逐词的原始毫秒时间，并保留原词文本。
+   `wordLyric` 仍按原兼容路径转成 **LRC，每个词前都带一个时间戳**：
 
    ```
    [00:00.00]五[00:00.43]百[00:01.13]英[00:01.65]里
@@ -154,7 +157,8 @@ QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1
    选这个形状是因为宿主的歌词读取器**一行的多个时间戳就当作多个词**，并据此生成逐字 TTML——
    宿主不必为逐字做任何特殊处理。
 
-`fetch_lyric` 因此回答两个字段：`lyric`（整行，明文路，兜底用）与 `wordLyric`（逐字，有则给）。
+`fetch_lyric` 外层保留 `lyric` 对象与 `wordLyric`；对象内包含整行 `lyric`、`translation`、`romanization`、
+`qrcLines` 和 `romanLines`。时间行 shape 为 `{startMs,durationMs,words:[{text,startMs,durationMs}]}`。
 **没有逐字不是错误**：老歌往往就没有，那时 `wordLyric` 为 `null`，宿主用 `lyric` 就好。
 翻译优先取加密路解出来的那份（明文路的 `trans` 常常是空的）。
 
@@ -192,6 +196,7 @@ QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1
 ### 已验证与剩余限制
 
 - 2026-10-04 完成真实账号只读、分页、搜索类型、类型化模型及可逆写入验证；详见[接续报告](continuation-verification-2026-10-04.md)。
+- 2026-10-05 完成安卓宿主（NeuMusic）接入验证：本轮新增的分页/轮播批次方法与 `set_liked_by_id` 在真账号上通过（写仅对一首未喜欢的歌曲加/删各一次，前后快照一致）；详见 NeuMusic 接入报告（`Music_app/docs/helpernext-integration-2026-10-05.md`）。
 - 私信与 COS 上传仍是原工作流延期模块；手机 App MQTT 扫码也未移植。
 - 本轮按用户要求跳过所有登录/扫码测试，不查看截图。
 - 清空不喜欢列表仅验证获取 Token 的预检，不执行全量删除，以保留既有条目的时间和顺序。缺失 Token 或非零业务码会阻止删除。

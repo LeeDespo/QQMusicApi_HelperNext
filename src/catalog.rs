@@ -13,6 +13,8 @@ use crate::credential::Credential;
 use crate::upstream::{
     first_array, first_int, first_object, first_text, Call, Platform, Upstream, UpstreamError,
 };
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
+use base64::Engine;
 use serde_json::{json, Value};
 
 /// Streaming CDN prefix stripped from the upstream's relative `purl`.
@@ -26,7 +28,9 @@ const STREAM_CDN: &str = "https://isure.stream.qqmusic.qq.com/";
 /// only correct way to learn what is actually available.
 const QUALITY_LADDER: &[(&str, &str, &str)] = &[
     ("flac", "F000", ".flac"),
+    ("ogg320", "O800", ".ogg"),
     ("320", "M800", ".mp3"),
+    ("ogg192", "O600", ".ogg"),
     ("128", "M500", ".mp3"),
     ("aac", "C400", ".m4a"),
 ];
@@ -437,7 +441,7 @@ pub fn album_tracks(
     album_id: Option<i64>,
     offset: i64,
     limit: i64,
-) -> Result<(Vec<Value>, Option<i64>), UpstreamError> {
+) -> Result<(Vec<Value>, Option<i64>, Option<i64>), UpstreamError> {
     let mut param = serde_json::Map::new();
     match (album_mid, album_id) {
         (Some(mid), _) if !mid.trim().is_empty() => {
@@ -464,7 +468,17 @@ pub fn album_tracks(
     // The response reports the album's size, so a caller can page through it and
     // can tell whether "select all" means all of it.
     let total = first_int(&data, &["totalNum", "total"]);
-    Ok((crate::methods::decoded_tracks(&data), total))
+    // Offsets address raw upstream rows. Some rows do not contain enough
+    // metadata to become a Track, but still consume a position in the page.
+    let next_offset = crate::methods::next_track_offset(
+        offset.max(0),
+        crate::methods::raw_track_row_count(&data),
+    );
+    Ok((
+        crate::methods::decoded_tracks(&data),
+        total,
+        Some(next_offset),
+    ))
 }
 
 // MARK: - An artist's works
@@ -482,6 +496,25 @@ pub fn artist_songs(
     page: i64,
     limit: i64,
 ) -> Result<Vec<Value>, UpstreamError> {
+    let offset = (page.max(1) - 1) * limit;
+    artist_songs_page(
+        upstream, credential, platform, singer_mid, sort, offset, limit,
+    )
+    .map(|(tracks, _, _)| tracks)
+}
+
+/// One globally ordered artist-song page. `order=2` is the upstream's true
+/// latest sort; the old page-local sort could not order rows across pages.
+pub fn artist_songs_page(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    singer_mid: &str,
+    sort: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<i64>, Option<i64>), UpstreamError> {
+    let order = artist_order(sort)?;
     let data = upstream.call_with(
         credential,
         crate::Class::Read,
@@ -491,35 +524,45 @@ pub fn artist_songs(
             method: "GetSingerSongList",
             param: json!({
                 "singerMid": singer_mid,
-                "order": 1,
+                "order": order,
                 "number": limit,
-                "begin": (page.max(1) - 1) * limit,
+                "begin": offset.max(0),
             }),
         },
     )?;
-    let items = first_array(&data, &["songlist", "songList", "list"])
-        .cloned()
+    Ok(artist_song_page_from_data(&data, offset, limit))
+}
+
+fn artist_song_page_from_data(
+    data: &Value,
+    offset: i64,
+    limit: i64,
+) -> (Vec<Value>, Option<i64>, Option<i64>) {
+    let items = first_array(data, &["songlist", "songList", "list"])
+        .map(Vec::as_slice)
         .unwrap_or_default();
-    let mut tracks = crate::methods::decoded_tracks(&data);
-    if sort.eq_ignore_ascii_case("latest") {
-        // Attach each track's release date so the ordering is explainable, then
-        // sort. Tracks with no date sink to the end rather than being dropped.
-        for (track, item) in tracks.iter_mut().zip(items.iter()) {
-            let album = first_object(item, &["album", "albumInfo"]);
-            if let Some(date) =
-                album.and_then(|album| first_text(album, &["time_public", "publishDate"]))
+    // Some upstream profiles return at least 30 rows even when number=3.
+    // Bound the raw window before normalization; unavailable rows still count.
+    let consumed = items.len().min(limit.max(0) as usize);
+    let tracks = items
+        .iter()
+        .take(consumed)
+        .filter_map(|item| {
+            let mut track = crate::methods::decode_track(item)?;
+            let source = first_object(item, &["track", "song", "songInfo"]).unwrap_or(item);
+            if let Some(date) = first_object(source, &["album", "albumInfo"])
+                .and_then(|album| first_text(album, &["time_public", "publishDate"]))
             {
-                if let Some(object) = track.as_object_mut() {
-                    object.insert("releaseDate".into(), json!(date));
-                }
+                track["releaseDate"] = json!(date);
             }
-        }
-        tracks.sort_by(|a, b| {
-            let key = |value: &Value| first_text(value, &["releaseDate"]).unwrap_or_default();
-            key(b).cmp(&key(a))
-        });
-    }
-    Ok(tracks)
+            Some(track)
+        })
+        .collect();
+    (
+        tracks,
+        first_int(data, &["totalNum", "total"]),
+        Some(crate::methods::next_track_offset(offset.max(0), consumed)),
+    )
 }
 
 /// An artist's albums, with the same two sorts.
@@ -532,6 +575,25 @@ pub fn artist_albums(
     page: i64,
     limit: i64,
 ) -> Result<Vec<Value>, UpstreamError> {
+    let offset = (page.max(1) - 1) * limit;
+    artist_albums_page(
+        upstream, credential, platform, singer_mid, sort, offset, limit,
+    )
+    .map(|(albums, _)| albums)
+}
+
+/// One artist-album page in upstream hot/latest order. Song counts are filled
+/// by one batched request per 30 albums, matching the Android page's usage.
+pub fn artist_albums_page(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    singer_mid: &str,
+    sort: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<(Vec<Value>, Option<i64>), UpstreamError> {
+    let order = artist_order(sort)?;
     let data = upstream.call_with(
         credential,
         crate::Class::Read,
@@ -541,9 +603,9 @@ pub fn artist_albums(
             method: "GetAlbumList",
             param: json!({
                 "singerMid": singer_mid,
-                "order": 1,
+                "order": order,
                 "number": limit,
-                "begin": (page.max(1) - 1) * limit,
+                "begin": offset.max(0),
             }),
         },
     )?;
@@ -565,16 +627,76 @@ pub fn artist_albums(
                 ),
                 "artist": first_text(item, &["singerName", "singer_name"]),
                 "releaseDate": first_text(item, &["publishDate", "time_public"]),
+                "songCount": first_int(item, &["songCount", "songNum", "songnum"]),
             }))
         })
         .collect();
-    if sort.eq_ignore_ascii_case("latest") {
-        albums.sort_by(|a, b| {
-            let key = |value: &Value| first_text(value, &["releaseDate"]).unwrap_or_default();
-            key(b).cmp(&key(a))
-        });
+    let mids: Vec<String> = albums
+        .iter()
+        .filter(|album| album.get("songCount").map_or(true, Value::is_null))
+        .filter_map(|album| first_text(album, &["albumMid"]))
+        .collect();
+    let counts = batched_album_song_counts(upstream, credential, platform, &mids);
+    for album in &mut albums {
+        if album.get("songCount").map_or(true, Value::is_null) {
+            if let Some(mid) = first_text(album, &["albumMid"]) {
+                if let Some(count) = counts.get(&mid) {
+                    album["songCount"] = json!(count);
+                }
+            }
+        }
     }
-    Ok(albums)
+    let total = first_int(&data, &["total", "totalNum"]);
+    Ok((albums, total))
+}
+
+fn artist_order(sort: &str) -> Result<i64, UpstreamError> {
+    match sort.trim().to_ascii_lowercase().as_str() {
+        "hot" | "popular" | "1" => Ok(1),
+        "latest" | "new" | "2" => Ok(2),
+        _ => Err(UpstreamError::Upstream(format!(
+            "未知歌手排序：{sort}（请用 hot 或 latest）"
+        ))),
+    }
+}
+
+fn batched_album_song_counts(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    album_mids: &[String],
+) -> std::collections::HashMap<String, i64> {
+    let mut counts = std::collections::HashMap::new();
+    for batch in album_mids.chunks(30) {
+        let calls = batch
+            .iter()
+            .map(|mid| Call {
+                module: "music.musichallAlbum.AlbumSongList",
+                method: "GetAlbumSongList",
+                param: json!({ "albumMid": mid, "begin": 0, "num": 1 }),
+            })
+            .collect();
+        let Ok(response) = upstream.call_many_with(credential, crate::Class::Read, platform, calls)
+        else {
+            continue;
+        };
+        for (index, mid) in batch.iter().enumerate() {
+            let key = format!("req_{index}");
+            let Some(slot) = response.get(&key) else {
+                continue;
+            };
+            if first_int(slot, &["code"]).unwrap_or(-1) != 0 {
+                continue;
+            }
+            if let Some(total) = slot
+                .get("data")
+                .and_then(|data| first_int(data, &["totalNum", "total"]))
+            {
+                counts.insert(mid.clone(), total);
+            }
+        }
+    }
+    counts
 }
 
 /// An artist's profile.
@@ -959,6 +1081,34 @@ pub fn radio_tracks(
     Ok(crate::methods::decoded_tracks(&data))
 }
 
+/// One request to QQ Music's rotating radio source. Callers fetch subsequent
+/// batches with `first_play=false` and own de-duplication across the rotation.
+pub fn radio_track_batch(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    station_id: i64,
+    first_play: bool,
+) -> Result<Vec<Value>, UpstreamError> {
+    if station_id <= 0 {
+        return Err(UpstreamError::Upstream("stationId 必须是正数".into()));
+    }
+    let data = upstream.call_with(
+        credential,
+        crate::Class::Interactive,
+        platform,
+        Call {
+            module: "mb_track_radio_svr",
+            method: "get_radio_track",
+            param: json!({
+                "id": station_id,
+                "firstplay": if first_play { 1 } else { 0 },
+            }),
+        },
+    )?;
+    Ok(crate::methods::decoded_tracks(&data))
+}
+
 /// New songs for a region.
 ///
 /// The region code is the upstream's own `type`: 0 最新, 1 内地, 2 港台, 3 欧美,
@@ -1014,25 +1164,26 @@ pub fn recommend_feed(
 /// exists. The word-level (`qrc`) track is only available on the encrypted
 /// route, so `word_lyric` comes back empty — `docs/parsing.md` records this.
 /// What the encrypted lyric route answers with.
-///
-/// Both fields arrive as hex-encoded ciphertext of the same QRC cipher, which is
-/// why they are decrypted together here rather than by the caller.
 #[derive(Debug, Default)]
 pub struct EncryptedLyrics {
-    /// The word-level track as LRC (one timestamp per word).
+    /// The word-level track in the existing host-compatible LRC format.
     pub word: Option<String>,
-    /// The translation, also as LRC.
+    /// The translation, decoded to readable text when available.
     pub translation: Option<String>,
+    /// The exact QRC timing for the source lyric.
+    pub qrc_lines: Option<Vec<crate::qrc::QrcLine>>,
+    /// The exact QRC timing for romanized lyric text.
+    pub roman_lines: Option<Vec<crate::qrc::QrcLine>>,
+    /// The decoded romanization text, when supplied.
+    pub romanization: Option<String>,
 }
 
 /// Fetch the word-level lyrics and the translation.
 ///
-/// Only the encrypted route has them: with `qrc:1` (and `crypt:1`) the `lyric`
-/// field stops being base64 LRC and becomes the QRC ciphertext, and `trans` is
-/// encrypted the same way. Neither being present is normal — plenty of songs have
-/// no word-level track and no translation — so a miss comes back as `None` rather
-/// than an error. A payload we *cannot read* is logged, because that means the
-/// envelope changed rather than that the song has nothing.
+/// The response is not consistent across QQ Music routes: fields may be readable
+/// text, base64 text, or QRC ciphertext. Normalize each independently, preserving
+/// the existing `word` LRC output while also returning exact millisecond timing.
+/// `trans` is deliberately treated as text; its `[kana:…]` metadata is not QRC.
 pub fn encrypted_lyrics(
     upstream: &Upstream,
     credential: &Credential,
@@ -1054,7 +1205,7 @@ pub fn encrypted_lyrics(
                 "lrc_t": 0,
                 "qrc": 1,
                 "qrc_t": 0,
-                "roma": 0,
+                "roma": 1,
                 "roma_t": 0,
                 "trans": 1,
                 "trans_t": 0,
@@ -1065,24 +1216,76 @@ pub fn encrypted_lyrics(
         },
     )?;
 
-    let decode = |field: &str, transform: fn(&str) -> Result<String, crate::qrc::QrcError>| {
+    let decode = |field: &str| -> Option<String> {
         let raw = first_text(&data, &[field]).filter(|value| !value.trim().is_empty())?;
-        match transform(&raw) {
-            Ok(text) if !text.trim().is_empty() => Some(text),
-            Ok(_) => None,
-            Err(error) => {
-                eprintln!("[qqmusic-helper-next] {field} 解析失败 songMid={song_mid}：{error}");
+        match decode_lyric_text(&raw) {
+            Some(text) if !text.trim().is_empty() => Some(text),
+            Some(_) => None,
+            None => {
+                eprintln!("[qqmusic-helper-next] {field} 解析失败 songMid={song_mid}");
                 None
             }
         }
     };
+    let qrc_text = decode("lyric");
+    let qrc_lines = qrc_text
+        .as_deref()
+        .map(crate::qrc::parse)
+        .filter(|lines| !lines.is_empty());
+    let romanization = decode("roma");
+    let roman_lines = romanization
+        .as_deref()
+        .map(crate::qrc::parse)
+        .filter(|lines| !lines.is_empty());
+    let word = qrc_lines
+        .as_deref()
+        .map(crate::qrc::to_word_lrc)
+        .or_else(|| qrc_text.clone());
 
     Ok(EncryptedLyrics {
-        word: decode("lyric", crate::qrc::word_level_lrc),
-        // The translation is an ordinary LRC once decrypted, so it only needs the
-        // cipher undone.
-        translation: decode("trans", |hex| crate::qrc::decrypt_hex(hex)),
+        word,
+        translation: decode("trans"),
+        qrc_lines,
+        roman_lines,
+        romanization,
     })
+}
+
+/// Decode an encrypted QRC document, a base64-encoded text field, or a plain
+/// lyric field. Failed guesses fall through so plaintext kana annotations and
+/// ordinary LRC remain unchanged.
+fn decode_lyric_text(raw: &str) -> Option<String> {
+    let text = raw.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    if let Some(decoded) = decode_qrc_or_text(text) {
+        return Some(decoded);
+    }
+
+    let decoded_base64 = STANDARD
+        .decode(text)
+        .or_else(|_| STANDARD_NO_PAD.decode(text))
+        .or_else(|_| URL_SAFE.decode(text))
+        .or_else(|_| URL_SAFE_NO_PAD.decode(text));
+    if let Ok(bytes) = decoded_base64 {
+        if let Ok(decoded) = String::from_utf8(bytes) {
+            if let Some(unwrapped) = decode_qrc_or_text(decoded.trim()) {
+                return Some(unwrapped);
+            }
+            if !decoded.trim().is_empty() {
+                return Some(decoded);
+            }
+        }
+    }
+
+    Some(raw.to_string())
+}
+
+fn decode_qrc_or_text(encoded: &str) -> Option<String> {
+    let decrypted = crate::qrc::decrypt_hex(encoded).ok()?;
+    Some(crate::qrc::extract_payload(&decrypted).unwrap_or(decrypted))
 }
 
 pub fn lyric(
@@ -1138,17 +1341,28 @@ pub fn stream_url(
     if song_mid.trim().is_empty() {
         return Err(UpstreamError::Upstream("缺少 songMid".into()));
     }
-    let ladder = preferred_quality
-        .and_then(|wanted| {
+    let requested_quality = preferred_quality.map(normalize_quality_label);
+    let selected = if let Some(wanted) = requested_quality.as_deref() {
+        Some(
             QUALITY_LADDER
                 .iter()
-                .find(|(label, _, _)| label.eq_ignore_ascii_case(wanted))
-        })
-        .map(|entry| std::slice::from_ref(entry))
-        .unwrap_or(QUALITY_LADDER);
+                .find(|(label, _, _)| *label == wanted)
+                .ok_or_else(|| {
+                    UpstreamError::Upstream(format!(
+                        "未知音质档位：{}（请用 flac、ogg320、320、ogg192、128 或 aac）",
+                        preferred_quality.unwrap_or_default()
+                    ))
+                })?,
+        )
+    } else {
+        None
+    };
+    let ladder: &[(&str, &str, &str)] =
+        selected.map(std::slice::from_ref).unwrap_or(QUALITY_LADDER);
 
     let mut refusals: Vec<String> = Vec::new();
     let mut tried: Vec<String> = Vec::new();
+    let mut tier_results: Vec<Value> = Vec::new();
     for (label, prefix, extension) in ladder.iter().copied() {
         let filename = match media_mid.filter(|mid| !mid.trim().is_empty()) {
             Some(mid) => format!("{prefix}{mid}{extension}"),
@@ -1178,6 +1392,8 @@ pub fn stream_url(
         let result = first_int(&info, &["result"]).unwrap_or(RESULT_VKEY_FAILED);
         let purl = first_text(&info, &["purl", "url"]).unwrap_or_default();
         if result == RESULT_OK && !purl.is_empty() {
+            tried.push(format!("{label}:{result}"));
+            tier_results.push(json!({ "quality": label, "code": result, "playable": true }));
             return Ok(json!({
                 "source": SOURCE,
                 "songMid": song_mid,
@@ -1189,10 +1405,12 @@ pub fn stream_url(
                 "expiration": first_int(&data, &["expiration"]).unwrap_or(7200),
                 "playable": true,
                 "tried": tried,
+                "tierResults": tier_results,
             }));
         }
         tried.push(format!("{label}:{result}"));
         refusals.push(format!("{label}:{}", describe_result(result)));
+        tier_results.push(json!({ "quality": label, "code": result, "playable": false }));
     }
     // Not playable is an answer, not a failure: the app reads `restriction` for
     // the reason and `tried` for the log, and treats a missing url as "no".
@@ -1205,8 +1423,22 @@ pub fn stream_url(
         "playable": false,
         "restriction": classify_restriction(&tried),
         "tried": tried,
+        "tierResults": tier_results,
         "reason": format!("上游没有授予任何可用音质（{}）", refusals.join("、")),
     }))
+}
+
+fn normalize_quality_label(raw: &str) -> String {
+    let compact = raw.trim().to_ascii_lowercase().replace(['_', '-', ' '], "");
+    match compact.as_str() {
+        "standard" | "mp3128" | "m500" => "128".into(),
+        "hq" | "mp3320" | "m800" => "320".into(),
+        "aac96" | "c400" => "aac".into(),
+        "ogg192" | "o600" => "ogg192".into(),
+        "ogg320" | "o800" => "ogg320".into(),
+        "flac" | "f000" => "flac".into(),
+        _ => compact,
+    }
 }
 
 /// Map the per-tier result codes onto the one word the app shows.
@@ -1315,9 +1547,42 @@ mod tests {
     }
 
     #[test]
+    fn lyric_decoder_accepts_plain_base64_and_qrc_hex_without_eating_kana() {
+        assert_eq!(
+            decode_lyric_text("[00:01.00]plain"),
+            Some("[00:01.00]plain".into())
+        );
+        assert_eq!(decode_lyric_text("5L2g5aW9"), Some("你好".into()));
+        let kana = "[kana:1かな]\n[00:01.00]漢";
+        assert_eq!(decode_lyric_text(kana).as_deref(), Some(kana));
+
+        let hex = include_str!("qrc_vector_tmp.hex").trim();
+        let qrc = decode_lyric_text(hex).expect("official encrypted source fixture decodes");
+        assert!(!crate::qrc::parse(&qrc).is_empty());
+
+        let base64_hex = STANDARD.encode(hex);
+        let wrapped = decode_lyric_text(&base64_hex).expect("base64-wrapped QRC hex decodes");
+        assert_eq!(wrapped, qrc);
+    }
+
+    #[test]
+    fn album_song_count_accepts_source_aliases() {
+        for key in ["song_count", "song_num", "songNum", "songCount"] {
+            let mut source = json!({ "id": 1, "name": "专辑" });
+            source[key] = json!(12);
+            assert_eq!(map_album(&source).unwrap()["songCount"], 12, "{key}");
+        }
+    }
+
+    #[test]
     fn the_quality_ladder_is_ordered_best_first() {
-        assert_eq!(QUALITY_LADDER[0].0, "flac");
-        assert_eq!(QUALITY_LADDER.last().unwrap().0, "aac");
+        assert_eq!(
+            QUALITY_LADDER
+                .iter()
+                .map(|entry| entry.0)
+                .collect::<Vec<_>>(),
+            vec!["flac", "ogg320", "320", "ogg192", "128", "aac"]
+        );
         let mut labels: Vec<&str> = QUALITY_LADDER.iter().map(|entry| entry.0).collect();
         labels.sort();
         labels.dedup();
@@ -1435,6 +1700,58 @@ pub fn set_liked(
         },
     )?;
     Ok(json!({ "songId": song_id, "liked": liked }))
+}
+
+/// Add or remove a favorite by the numeric song id and report both business
+/// result layers. Unlike `set_liked`, this is an explicit receipt API for hosts
+/// that need to distinguish a successful write from the write throttle code.
+pub fn set_liked_by_id(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    song_id: i64,
+    liked: bool,
+) -> Result<Value, UpstreamError> {
+    require_login(credential)?;
+    if song_id <= 0 {
+        return Err(UpstreamError::Upstream("songId 必须是正数".into()));
+    }
+    let response = upstream.call_many_with(
+        credential,
+        crate::Class::Write,
+        platform,
+        vec![Call {
+            module: "music.musicasset.PlaylistDetailWrite",
+            method: if liked { "AddSonglist" } else { "DelSonglist" },
+            param: json!({
+                "dirId": 201,
+                "tid": 0,
+                "bFmtUtf8": true,
+                "v_songInfo": [{ "songId": song_id, "songType": 0 }],
+            }),
+        }],
+    )?;
+    let slot = response
+        .get("req_0")
+        .ok_or_else(|| UpstreamError::Upstream("喜欢写入响应缺少 req_0".into()))?;
+    let outer_code = first_int(slot, &["code"]).unwrap_or(-1);
+    let inner_code = slot.get("data").and_then(|data| {
+        first_int(data, &["retCode", "ret_code"]).or_else(|| {
+            first_object(data, &["result"])
+                .and_then(|result| first_int(result, &["retCode", "ret_code"]))
+        })
+    });
+    let success = outer_code == 0 && inner_code == Some(0);
+    let code = if outer_code != 0 {
+        outer_code
+    } else {
+        inner_code.unwrap_or(-1)
+    };
+    Ok(json!({
+        "success": success,
+        "code": code,
+        "throttled": code == 1000,
+    }))
 }
 
 // MARK: - Search
@@ -1572,7 +1889,7 @@ fn map_artist(item: &Value) -> Option<Value> {
     }))
 }
 
-fn map_album(item: &Value) -> Option<Value> {
+pub(crate) fn map_album(item: &Value) -> Option<Value> {
     let mid = first_text(item, &["albumMID", "albumMid", "albummid", "mid"]);
     let id = first_int(item, &["albumID", "albumId", "id"])?;
     Some(json!({
@@ -1588,6 +1905,7 @@ fn map_album(item: &Value) -> Option<Value> {
         ),
         "artist": first_text(item, &["singerName", "singername", "singer"]),
         "releaseDate": first_text(item, &["publish_date", "publishDate", "time_public"]),
+        "songCount": first_int(item, &["song_count", "song_num", "songNum", "songCount"]),
     }))
 }
 
@@ -1871,5 +2189,28 @@ mod artwork_tests {
             .as_str()
             .unwrap()
             .ends_with('Z'));
+    }
+}
+
+#[cfg(test)]
+mod artist_window_tests {
+    use super::*;
+    #[test]
+    fn oversized_artist_response_is_bounded_before_filtering() {
+        let source = json!({"totalNum": 479, "songList": [
+            {"songInfo":{"mid":"one","name":"One","album":{"time_public":"2026-01-01"}}},
+            {"songInfo":{"id":2,"name":"Unavailable"}},
+            {"songInfo":{"mid":"three","name":"Three"}}
+        ]});
+        let (tracks, total, next) = artist_song_page_from_data(&source, 200, 2);
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0]["songMid"], "one");
+        assert_eq!(tracks[0]["releaseDate"], "2026-01-01");
+        assert_eq!(total, Some(479));
+        assert_eq!(next, Some(202));
+        let (tracks, _, next) = artist_song_page_from_data(&source, 200, 100);
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(next, Some(203));
+        assert_eq!(artist_song_page_from_data(&source, -10, 2).2, Some(2));
     }
 }

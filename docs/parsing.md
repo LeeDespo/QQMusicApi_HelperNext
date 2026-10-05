@@ -78,12 +78,28 @@
 | `songMid` | `mid` / `songMid` / `songmid`（缺失→该条目丢弃） |
 | `songId` | `id` / `songId` / `songid` |
 | `title` | `name` / `title` / `songname` |
-| `artist` | `singer[].name` 用 `", "` 连接 |
+| `artist` | `singer[]`/`singers[]` 的 `name` 用 `", "` 连接；数组缺席或全无名时回退曲目顶层的 `singer`/`singername`/`singerName` 文本 |
+| `singers` / `singerMid` | `singer`/`singers` 数组，元素取 `mid`/`singerMid`/`singerMID` 与 `name`；`singerMid` 缺省是第一位歌手的 mid，再看曲目顶层同名字段 |
 | `album` / `albumMid` | `album.name` / `album.mid` |
 | `albumId` | `album.id` / `album.albumId`（**数字**，专辑页要用它） |
 | `imageURL` | 由 `albumMid` 拼 `T002R800x800M000<mid>.jpg` |
 | `duration` | `interval` / `duration`（秒） |
 | `payPlay` | `pay.pay_play`（嵌套，不是扁平键） |
+| `mediaMid` | `file.media_mid` / `file.mediaMid`，再看曲目顶层同名字段 |
+| `genre` | `genre` / `genreId` / `genre_id`（可选数字码，缺失保持 `null`） |
+| `fileSizes` | `file.size_*` 映射为 `[{name,bytes}]`，如 `size_128mp3` → `{name:"128mp3",bytes:…}`；旧响应缺失时为空数组 |
+
+`Album.songCount` 是可选字段；专辑搜索读取 `song_count`/`song_num`/`songNum`，歌手专辑列表优先用列表自带值，
+缺失项再按每批最多 30 张专辑批量读取曲数。
+
+## 6b. 分页使用实际行偏移
+
+`fetch_playlist_tracks_page`、`fetch_album_tracks` 和 `fetch_artist_songs_page` 都接收 `offset`/`limit` 并保留上游 `total`。
+曲目页额外回 `nextOffset`：它按上游原始列表行数递增，包含因缺少 mid 等原因无法解码为 `Track` 的行。
+因此 `total` 可以大于所有页里可播放曲目的总数；下一页必须使用 `nextOffset`，不能用已解码 `tracks.count` 推算，
+否则会重复请求过滤掉的行并卡在末尾。歌手专辑页仍按其返回专辑行分页。
+关注歌手 `fetch_follow_singers` 可直接传 `offset`，否则仍按 `page`/`num` 兼容旧契约。总数缺失表示 `null`，
+电台轮播 `fetch_radio_track_batch` 的 `total` 固定为 `null`；宿主用实际返回行数推进并自行去重。
 
 ## 7. 封面 URL 一律转 https
 
@@ -129,13 +145,15 @@ ptqrtoken  = hash33(qrsig)              ← 默认种子 0
 组件因此把两者分开成 `hash33(key)`（种子 5381，给 `g_tk`）与 `hash33_seeded(key, seed)`。
 **新增任何带签名的接口时，先去库里核对它用的种子**，别默认 5381。
 
-## 12. 逐字歌词要自己解密
+## 12. 歌词自动识别编码并保留逐字毫秒
 
-见[接口清单](endpoints.md)第三节。要点：`qrc:1` 时 `lyric`/`trans` 都是 **hex 密文**（不是 base64、
-也不是明文），解出来是 zlib；**判断 hex 还是 base64 要靠内容**，把密文当 base64 解会得到乱码，
-表现成"整首歌词加载不出来"——这类错误不会抛异常，只会渲染出垃圾。
+见[接口清单](endpoints.md)第三节。`fetch_lyric` 保持 `wordLyric` 兼容，同时在 `lyric` 对象里返回
+`qrcLines`、`romanLines`，每行与每个词都带 `startMs`/`durationMs` 的原始毫秒值。
+歌词字段可能是明文、base64 文本或 QRC hex 密文；组件按可验证的解码结果处理，不能把所有内容一概当 base64。
+`[kana:…]` 属于翻译文本元数据，保持明文，不送进 QRC 解密器。
 
-密钥是 QQ 私有的「类 DES」，不是标准 DES；移植时不要拿通用 DES 库硬套，盒子表和密钥位序都得照抄。
+QRC 密钥是 QQ 私有的「类 DES」，不是标准 DES；解密后再取 XML 内的歌词载荷。结构化解析保留词里的空格、方括号、
+括号文字以及末尾未计时文本；旧 `wordLyric` LRC 仍使用原有格式转换，其时间精度按 LRC centisecond 表示。
 
 ## 13. 空值的两种含义
 
@@ -201,7 +219,7 @@ ptqrtoken  = hash33(qrsig)              ← 默认种子 0
   **不参与**这个判断（参考就是如此）。该档实测回 `ekey: null`，宿主需自行决定是否降级到普通档。
 
 
-## 16. 实测响应编码与类型化契约（2026-10-04）
+## 17. 实测响应编码与类型化契约（2026-10-04）
 
 `PlaylistBaseWrite`（建/删歌单）与 `PlaylistDetailWrite`（加/删歌）可能返回 GBK 字节，却标注 UTF-8。
 组件仅在这两个模块且响应不是有效 UTF-8 时尝试 GBK；其他 JSON 路径继续严格校验。异常 UTF-16 单独代理码以 U+FFFD 表示，合法代理码对及字面量反斜线保持原样。

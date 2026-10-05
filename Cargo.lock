@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "qqmusic-api-helper-next"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "base64 0.22.1",

@@ -3,6 +3,12 @@
 同一份 Rust 内核通过 [BoltFFI](https://github.com/boltffi/boltffi) 生成各语言的绑定，
 所以 macOS/iOS 应用与 Android 应用共用一套实现。
 
+组件版本从 **0.1.0** 升为 **0.2.0**：BoltFFI 模型新增了曲目文件大小/曲风、专辑曲数、结构化 QRC（`QrcLine`/`QrcWord`）、
+分页偏移（`TrackPage.nextOffset`、新 `AlbumPage`）与喜欢写回执（`LikeReceipt`），并增加了初始化和分页等导出。
+JSON `PROTOCOL_VERSION` 仍为 **2**，旧的 stdio 请求与返回字段保持兼容；
+FFI 的 Rust 数据模型按字段顺序编码，因此 Kotlin/Swift bindings 与 native library 必须由同一版本一起生成和打包，
+不能把旧 bindings 与 0.2.0 native 混用。
+
 ## 生成与打包
 
 ```sh
@@ -47,19 +53,21 @@ Kotlin data class），字段名与 Rust 一致（`songMid`、`albumId`、`image
 
 ### 1. 告诉组件数据目录
 
-凭据落在宿主自己的可写目录里；组件不去猜平台路径。
+凭据落在宿主自己的可写目录里；组件不去猜平台路径。FFI 宿主在第一次调用任何 HelperNext API **之前**调用
+`initialize(dataDir, platform)`。相同目录和档案可重复初始化；冲突配置或首次 API 调用之后才初始化会返回错误。
+`platform` 使用 `web` 或 `android`。旧 Rust `configure(Configuration { .. })` 仍保留给 Rust 宿主。
 
 ```swift
-try configure(dataDir: appSupportURL.path)       // macOS/iOS：Application Support
+try initialize(dataDir: appSupportURL.path, platform: "web") // macOS/iOS：Application Support
 ```
 
 ```kotlin
-configure(dataDir = context.filesDir.absolutePath)   // Android：filesDir
+initialize(context.filesDir.absolutePath, "android") // Android：filesDir
 ```
 
 ### 2. 别在主线程调用
 
-导出的函数是**同步阻塞**的（内部是一个 HTTP 往返，最长 12 秒超时）。这是有意的：BoltFFI 的 async
+导出的函数是**同步阻塞**的（内部是一个 HTTP 往返，最长 20 秒超时）。这是有意的：BoltFFI 的 async
 导出需要宿主提供运行时，而"在后台线程调用同步函数"在两个平台上都是一行的事。
 
 ```swift
@@ -84,8 +92,12 @@ kind         name                 reason
 function     import::cookies      multi-statement wire writer
 ```
 
-**解决办法是把元组换成具名 `#[data]` 结构**，或者像现在这样干脆收窄签名——
-`import_credential(uin:qm_keyst:)` 只收两个字段，因为登录需要的就只有这两个。
+**解决办法是把元组换成具名 `#[data]` 结构**，或者使用具名参数。旧的
+`import_credential(uin, qm_keyst)` 保持不变；`import_credential_with_encrypt_uin(uin, qm_keyst, encryptUin)`
+是接收可选加密 UIN 的新增导出。
+
+Android pack 为 16 KB memory page 设置 ELF 最大 page size；release Cargo profile 会 strip 符号。
+打包后仍应对四个 ABI 的最终 `.so` 检查 `LOAD` 段对齐和导出符号。
 
 ## 子进程方式（不需要 FFI 的宿主）
 

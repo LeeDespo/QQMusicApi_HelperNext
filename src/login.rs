@@ -102,9 +102,10 @@ pub fn start_login(upstream: &Upstream) -> Result<LoginQrCode, UpstreamError> {
         .call()
         .map_err(|error| UpstreamError::Transport(error.to_string()))?;
     let cookies = collect_cookies(&response);
-    let identifier = cookies.get("qrsig").cloned().ok_or_else(|| {
-        UpstreamError::Upstream("二维码响应里没有 qrsig".into())
-    })?;
+    let identifier = cookies
+        .get("qrsig")
+        .cloned()
+        .ok_or_else(|| UpstreamError::Upstream("二维码响应里没有 qrsig".into()))?;
     let mut response = response;
     let bytes = response
         .body_mut()
@@ -160,11 +161,18 @@ pub fn poll_login(
     }
 
     // Logged in: the redirect url carries the account and the ticket to trade.
-    let uin = extract(&payload, "uin=").ok_or_else(|| UpstreamError::Upstream("缺少 uin".into()))?;
-    let sigx = extract(&payload, "ptsigx=").ok_or_else(|| UpstreamError::Upstream("缺少 ptsigx".into()))?;
+    let uin =
+        extract(&payload, "uin=").ok_or_else(|| UpstreamError::Upstream("缺少 uin".into()))?;
+    let sigx = extract(&payload, "ptsigx=")
+        .ok_or_else(|| UpstreamError::Upstream("缺少 ptsigx".into()))?;
     exchange_for_credential(upstream, store, &uin, &sigx)?;
-    let status = crate::methods::dispatch(upstream, store.load().as_ref(), "get_login_status", &json!({}))
-        .unwrap_or_else(|_| json!({ "login": { "loggedIn": true } }));
+    let status = crate::methods::dispatch(
+        upstream,
+        store.load().as_ref(),
+        "get_login_status",
+        &json!({}),
+    )
+    .unwrap_or_else(|_| json!({ "login": { "loggedIn": true } }));
     Ok(json!({ "event": "DONE", "loggedIn": true, "login": status.get("login") }))
 }
 
@@ -206,7 +214,10 @@ fn exchange_for_credential(
     let form = [
         ("response_type", "code"),
         ("client_id", CONNECT_APP_ID),
-        ("redirect_uri", "https://y.qq.com/portal/wx_redirect.html?login_type=1&surl=https://y.qq.com/"),
+        (
+            "redirect_uri",
+            "https://y.qq.com/portal/wx_redirect.html?login_type=1&surl=https://y.qq.com/",
+        ),
         ("scope", "get_user_info,get_app_friends"),
         ("state", "state"),
         ("switch", ""),
@@ -236,7 +247,8 @@ fn exchange_for_credential(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string();
-    let code = extract(&location, "code=").ok_or_else(|| UpstreamError::Upstream("获取 code 失败".into()))?;
+    let code = extract(&location, "code=")
+        .ok_or_else(|| UpstreamError::Upstream("获取 code 失败".into()))?;
 
     // Finally the music API turns the connect code into this account's credential.
     let data = upstream.call_with_tme_login_type(
@@ -380,10 +392,8 @@ mod tests {
 
     #[test]
     fn ptui_replies_are_parsed_into_code_and_payload() {
-        let (code, payload) = parse_ptui(
-            "ptuiCB('67','0','','0','二维码已扫描，请确认。','')",
-        )
-        .expect("parses");
+        let (code, payload) =
+            parse_ptui("ptuiCB('67','0','','0','二维码已扫描，请确认。','')").expect("parses");
         assert_eq!(code, 67);
         assert!(payload.is_empty());
 
@@ -410,7 +420,10 @@ mod tests {
 
     #[test]
     fn form_values_are_percent_encoded() {
-        assert_eq!(encode("https://y.qq.com/a?b=1&c=2"), "https%3A%2F%2Fy.qq.com%2Fa%3Fb%3D1%26c%3D2");
+        assert_eq!(
+            encode("https://y.qq.com/a?b=1&c=2"),
+            "https%3A%2F%2Fy.qq.com%2Fa%3Fb%3D1%26c%3D2"
+        );
         assert_eq!(encode("abc-_.~"), "abc-_.~");
     }
 }

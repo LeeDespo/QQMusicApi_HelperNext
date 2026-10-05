@@ -751,6 +751,14 @@ fn relation_params(euin: &str, page: i64, num: i64) -> Value {
     })
 }
 
+fn relation_params_at_offset(euin: &str, page: i64, num: i64, offset: Option<i64>) -> Value {
+    let mut param = relation_params(euin, page, num);
+    if let Some(offset) = offset {
+        param["From"] = json!(offset);
+    }
+    param
+}
+
 /// 好友列表参数（参考 `get_friend`）：`Page` 就是页码减一。
 fn friend_params(page: i64, num: i64) -> Value {
     json!({ "PageSize": num, "Page": page - 1 })
@@ -840,9 +848,21 @@ fn relation_list(
     method: &'static str,
     what: &str,
 ) -> Result<Value, UpstreamError> {
+    relation_list_at_offset(upstream, credential, platform, params, method, what, None)
+}
+
+fn relation_list_at_offset(
+    upstream: &Upstream,
+    credential: &Credential,
+    platform: Platform,
+    params: &Value,
+    method: &'static str,
+    what: &str,
+    offset: Option<i64>,
+) -> Result<Value, UpstreamError> {
     require_login(credential)?;
     let euin = resolved_euin(upstream, credential, params)?;
-    let param = relation_params(&euin, page_of(params), size_of(params));
+    let param = relation_params_at_offset(&euin, page_of(params), size_of(params), offset);
     let data = upstream.call_with(
         credential,
         Class::Account,
@@ -866,13 +886,14 @@ fn follow_singers(
     platform: Platform,
     params: &Value,
 ) -> Result<Value, UpstreamError> {
-    relation_list(
+    relation_list_at_offset(
         upstream,
         credential,
         platform,
         params,
         "GetFollowSingerList",
         "关注的歌手列表",
+        first_int(params, &["offset"]),
     )
 }
 
@@ -1002,6 +1023,18 @@ pub fn fetch_follow_singers(
         "fetch_follow_singers",
         relation_wrapper_params(euin, page, num),
     )
+}
+
+/// 某个账号关注的歌手一页，直接按已加载行数发 `From`；保留总数用于继续翻页。
+#[export]
+pub fn fetch_follow_singers_at_offset(
+    euin: Option<String>,
+    offset: i64,
+    num: Option<i64>,
+) -> Result<UserRelationList, crate::HelperError> {
+    let mut params = relation_wrapper_params(euin, None, num);
+    params["offset"] = json!(offset);
+    crate::port::call("fetch_follow_singers", params)
 }
 
 /// 某个账号的粉丝一页；需要登录。
@@ -1182,6 +1215,11 @@ mod tests {
             relation_params("EUIN", 3, 5),
             json!({ "HostUin": "EUIN", "From": 10, "Size": 5 }),
             "参考把页码换算成 From = (page - 1) * num"
+        );
+        assert_eq!(
+            relation_params_at_offset("EUIN", 1, 30, Some(47)),
+            json!({ "HostUin": "EUIN", "From": 47, "Size": 30 }),
+            "explicit offsets preserve the number of rows already loaded"
         );
         assert_eq!(
             friend_params(1, 10),

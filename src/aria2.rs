@@ -169,7 +169,11 @@ impl Aria2 {
         if let Some(running) = self.running.lock().expect("aria2").as_ref() {
             // The port is deliberately not pushed: a listening socket cannot move,
             // so the new value applies the next time the engine starts.
-            let _ = self.call_on(running, "aria2.changeGlobalOption", json!([options.to_rpc()]));
+            let _ = self.call_on(
+                running,
+                "aria2.changeGlobalOption",
+                json!([options.to_rpc()]),
+            );
         }
     }
 
@@ -422,7 +426,11 @@ impl Aria2 {
     pub fn cancel(&self, gid: Option<&str>) -> Result<Vec<String>, UpstreamError> {
         let targets: Vec<String> = match gid {
             Some(gid) => vec![gid.to_string()],
-            None => self.list()?.iter().filter_map(|task| text_of(task, "gid")).collect(),
+            None => self
+                .list()?
+                .iter()
+                .filter_map(|task| text_of(task, "gid"))
+                .collect(),
         };
         let mut removed = Vec::new();
         for target in targets {
@@ -432,7 +440,13 @@ impl Aria2 {
             let path = self
                 .call("aria2.tellStatus", json!([target]))
                 .ok()
-                .and_then(|status| status.get("files").and_then(Value::as_array).and_then(|files| files.first()).cloned())
+                .and_then(|status| {
+                    status
+                        .get("files")
+                        .and_then(Value::as_array)
+                        .and_then(|files| files.first())
+                        .cloned()
+                })
                 .and_then(|file| text_of(&file, "path"));
             let _ = self.call("aria2.forceRemove", json!([target]));
             if let Some(path) = path {
@@ -462,7 +476,12 @@ impl Aria2 {
         self.call_on(running, method, params)
     }
 
-    fn call_on(&self, running: &Running, method: &str, params: Value) -> Result<Value, UpstreamError> {
+    fn call_on(
+        &self,
+        running: &Running,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, UpstreamError> {
         let mut params = params.as_array().cloned().unwrap_or_default();
         params.insert(0, json!(format!("token:{}", running.secret)));
         let body = json!({
@@ -477,15 +496,19 @@ impl Aria2 {
             .send_json(&body)
             .map_err(|error| UpstreamError::Transport(format!("aria2 RPC 失败：{error}")))?;
         let mut response = response;
-        let value: Value = response
-            .body_mut()
-            .read_json()
-            .map_err(|error| UpstreamError::Transport(format!("aria2 RPC 返回不是 JSON：{error}")))?;
+        let value: Value = response.body_mut().read_json().map_err(|error| {
+            UpstreamError::Transport(format!("aria2 RPC 返回不是 JSON：{error}"))
+        })?;
         if let Some(error) = value.get("error") {
             // aria2 answers `{"error":{"code":1,"message":"..."}}` for a refused
             // call — most often a bad option, which is worth reading verbatim.
-            let message = error.get("message").and_then(Value::as_str).unwrap_or("未知错误");
-            return Err(UpstreamError::Upstream(format!("aria2 拒绝了 {method}：{message}")));
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("未知错误");
+            return Err(UpstreamError::Upstream(format!(
+                "aria2 拒绝了 {method}：{message}"
+            )));
         }
         Ok(value.get("result").cloned().unwrap_or(Value::Null))
     }
@@ -522,7 +545,12 @@ fn summarise_task(task: &Value) -> Value {
 fn number_of(value: &Value, key: &str) -> i64 {
     value
         .get(key)
-        .and_then(|inner| inner.as_str().and_then(|text| text.parse().ok()).or_else(|| inner.as_i64()))
+        .and_then(|inner| {
+            inner
+                .as_str()
+                .and_then(|text| text.parse().ok())
+                .or_else(|| inner.as_i64())
+        })
         .unwrap_or(0)
 }
 
@@ -578,13 +606,20 @@ pub fn options_from_params(params: &Value) -> Aria2Options {
     let int = |key: &str, fallback: u32| -> u32 {
         params
             .get(key)
-            .and_then(|value| value.as_i64().or_else(|| value.as_str().and_then(|t| t.parse().ok())))
+            .and_then(|value| {
+                value
+                    .as_i64()
+                    .or_else(|| value.as_str().and_then(|t| t.parse().ok()))
+            })
             .map(|value| value.max(0) as u32)
             .unwrap_or(fallback)
     };
     Aria2Options {
         split: int("split", defaults.split),
-        max_connection_per_server: int("maxConnectionPerServer", defaults.max_connection_per_server),
+        max_connection_per_server: int(
+            "maxConnectionPerServer",
+            defaults.max_connection_per_server,
+        ),
         max_concurrent_downloads: int("maxConcurrentDownloads", defaults.max_concurrent_downloads),
         min_split_size_mib: int("minSplitSizeMiB", defaults.min_split_size_mib),
         max_overall_download_limit_kib: int(
@@ -621,7 +656,10 @@ mod tests {
         assert_eq!(wild.max_concurrent_downloads, 1);
         assert_eq!(wild.min_split_size_mib, 1);
         assert_eq!(wild.max_overall_download_limit_kib, 1_048_576);
-        assert_eq!(wild.port, 1024, "a privileged port is not the user's to take");
+        assert_eq!(
+            wild.port, 1024,
+            "a privileged port is not the user's to take"
+        );
     }
 
     #[test]
@@ -637,7 +675,10 @@ mod tests {
         let payload = options.to_rpc();
         assert_eq!(payload["split"], "4");
         assert_eq!(payload["min-split-size"], "2M");
-        assert_eq!(payload["max-overall-download-limit"], "0", "0 means no limit to aria2");
+        assert_eq!(
+            payload["max-overall-download-limit"], "0",
+            "0 means no limit to aria2"
+        );
         assert_eq!(payload["max-concurrent-downloads"], "3");
     }
 
@@ -645,7 +686,10 @@ mod tests {
     fn a_partial_configure_keeps_the_other_defaults() {
         let options = options_from_params(&json!({ "split": 8 }));
         assert_eq!(options.split, 8);
-        assert_eq!(options.max_concurrent_downloads, Aria2Options::default().max_concurrent_downloads);
+        assert_eq!(
+            options.max_concurrent_downloads,
+            Aria2Options::default().max_concurrent_downloads
+        );
     }
 
     #[test]

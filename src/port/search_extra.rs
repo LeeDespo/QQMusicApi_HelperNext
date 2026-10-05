@@ -1935,7 +1935,8 @@ mod tests {
 
     #[test]
     fn a_song_search_page_maps_the_meta_and_the_track() {
-        let payload = search_by_type_payload(&raw_search_by_type_song());
+        let source = raw_search_by_type_song();
+        let payload = search_by_type_payload(&source);
         assert_eq!(payload["searchid"], "290132681600515942");
         assert_eq!(payload["perpage"], 10);
         assert_eq!(payload["nextpage"], 2);
@@ -1956,6 +1957,16 @@ mod tests {
         assert_eq!(songs[0].song_mid, "001Bbywq2gicae");
         assert_eq!(songs[0].duration, Some(260));
         assert_eq!(songs[0].singers.as_ref().map(Vec::len), Some(1));
+        // Reuse this captured upstream-shaped source fixture for the shared
+        // playback track mapper; these fields used to be discarded there.
+        let decoded = crate::methods::decode_track(&source["body"]["item_song"][0])
+            .expect("catalogue track decodes");
+        assert_eq!(decoded["mediaMid"], "003Qui1q2u1Zho");
+        assert_eq!(decoded["genre"], 0);
+        assert_eq!(
+            decoded["fileSizes"],
+            json!([{"name":"128mp3","bytes":4317292}])
+        );
         let groups = response.selectors.expect("有筛选器");
         assert_eq!(groups[0][0].id, Some(4558));
         assert_eq!(groups[0][0].type_id, Some(0));
@@ -1998,6 +2009,7 @@ mod tests {
                     "core_album_config": {"album_type": 1, "award_label": "殿堂史诗唱片"},
                     "description": "<em>周杰伦</em>  2026-03-25",
                     "singer": "<em>周杰伦</em>",
+                    "song_num": 12,
                     "singer_list": [{"id": 4558, "mid": "", "name": "周杰伦", "title": "<em>周杰伦</em>"}],
                     "tag_list": []
                 }]
@@ -2025,6 +2037,14 @@ mod tests {
             albums[0].pic.as_deref(),
             Some("https://y.gtimg.cn/music/photo_new/T002R180x180M0000041WVfh2vtlJE_1.jpg")
         );
+        let library_album = crate::catalog::map_album(&json!({
+            "id": 87495226,
+            "albummid": "0041WVfh2vtlJE",
+            "name": "太阳之子",
+            "song_num": 12
+        }))
+        .expect("album maps to shared model");
+        assert_eq!(library_album["songCount"], 12);
         assert_eq!(response.nextpage, Some(-1), "取完了");
     }
 
