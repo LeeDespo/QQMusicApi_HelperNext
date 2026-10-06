@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and lay out the Android package (docs/release.md §5, §6).
+# Build and lay out the Android package (docs/RELEASING.md §5, §6).
 #
 # Output in $RELEASE_DIR (default dist/release):
 #   qqmusic-helper-next-v<version>-android.zip

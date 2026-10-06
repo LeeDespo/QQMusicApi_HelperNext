@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Assemble the top-level release metadata from the two packages: the release
-# manifest (docs/release.md §7) and SHA256SUMS (§8). Runs in the release job,
+# manifest (docs/RELEASING.md §7) and SHA256SUMS (§8). Runs in the release job,
 # after both build jobs have uploaded their artifacts into $RELEASE_DIR.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

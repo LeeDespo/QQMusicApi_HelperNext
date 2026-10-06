@@ -1,6 +1,6 @@
 name: Release
 
-# A release is a tag, and is only ever built from one (docs/release.md §9.3).
+# A release is a tag, and is only ever built from one (docs/RELEASING.md §9.3).
 on:
   push:
     tags: ["v*"]

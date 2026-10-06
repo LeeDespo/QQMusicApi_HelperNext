@@ -8,10 +8,10 @@
 
 | 类型 | 典型改动 | 落点 |
 |---|---|---|
-| A 文档/规则 | 契约记录、待决事项、发布规则 | `docs/`，发布语义同步 [release.md](release.md) |
+| A 文档/规则 | 契约记录、待决事项、发布规则 | `docs/`，发布语义同步 [RELEASING.md](RELEASING.md) |
 | B 新增端点（常态） | 参考实现里有、组件还没有的接口 | `src/port/` 新领域文件，按第 4 节检查表 |
 | C 既有契约变更（罕见） | 改 `src/api.rs`/`models.rs`/`methods.rs`/`catalog.rs` 或 port 既有文件的既有行为 | 先在 [pending.md](pending.md) 记录取舍，评审后再动；同步 FFI 成套更新 |
-| D 平台与打包 | `boltffi.toml`、打包脚本、CI | 遵守 [release.md](release.md) 的范围与禁止事项 |
+| D 平台与打包 | `boltffi.toml`、打包脚本、CI | 遵守 [RELEASING.md](RELEASING.md) 的范围与禁止事项 |
 | E 测试基建 | 冒烟脚本、离线测试 | 遵守 [testing.md](testing.md) 的安全规则 |
 
 ## 2. 新增能力的固定顺序

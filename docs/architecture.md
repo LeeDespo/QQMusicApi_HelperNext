@@ -108,7 +108,7 @@ port 层，而既有代码是已上线契约、不能被顺手改动——把两
 | 6 | port/ 一领域一文件、三处登记 | 12 个领域文件 + `signed.rs`（zzc 签名支撑，无 `METHODS`）+ `mod.rs`；登记点 `src/port/mod.rs:20-32`（mod）、`:39`（all_methods）、`:66`（dispatch）；确定性测试 `:172-196` | ✅ |
 | 7 | 两个调用面一个实现 | `src/bin/stdio.rs:224` 与 `src/api.rs:49` 都汇入 `methods::dispatch`；`get_helper_info` 广告并集 | ✅ |
 | 8 | `src/` 无临时/数据文件 | `find src -name "*_tmp.*" -o -name "*.hex" -o -name "*.json"` | ✅ 无命中。QRC 已知答案向量已迁移至 `tests/fixtures/qrc/qrc-vector.hex`，`src/lib.rs:237`、`src/catalog.rs:1601`、`src/port/library_extra.rs:555` 三处 `include_str!` 已同步改路径，迁移后 `cargo test` 复跑三个向量测试仍绿（直接删除会破坏它们） |
-| 9 | 仓库卫生 | `git ls-files` 无 `dist/`、`target/`、`.zcodeignore` 条目；根目录无 `release_plan.md` | ✅ |
+| 9 | 仓库卫生 | `git ls-files` 无 `dist/`、`target/`、`.zcodeignore` 条目；release 真源唯一：`docs/RELEASING.md` 存在、根目录无 `release_plan.md`、无 `docs/release.md` | ✅ |
 | 10 | 无凭据泄漏 | 对 tracked 及待入库文本文件宽松扫描 `qm_keyst|musickey|qimei16|qimei36|encrypt_uin` 后跟引号值：0 命中；7 个冒烟取证 JSON（`docs/history/evidence/2026-10-04/`）逐个 `grep -c` 同样为 0 | ✅ |
 
 未列入本体检的：`cargo fmt --check`。按仓库政策**任何人不得全仓跑 `cargo fmt`**，

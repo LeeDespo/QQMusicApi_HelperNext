@@ -46,11 +46,12 @@ else
     fail '.zcodeignore is git-tracked'
 fi
 
-# 5. 根目录不得出现第二 release 真源（唯一真源是 docs/release.md）。
-if [ ! -e release_plan.md ]; then
-    pass 'no release_plan.md at repo root'
+# 5. release 真源唯一：docs/RELEASING.md 是唯一真源；根目录不得出现 release_plan.md，
+#    docs/release.md 不存在（改名后不得回流出第二份）。
+if [ ! -e release_plan.md ] && [ ! -e docs/release.md ] && [ -f docs/RELEASING.md ]; then
+    pass 'release truth is docs/RELEASING.md only'
 else
-    fail 'release_plan.md exists at repo root (release truth lives in docs/release.md)'
+    fail 'release doc layout changed: expected docs/RELEASING.md, no root release_plan.md, no docs/release.md'
 fi
 
 # 6. 宽松 secret 扫描：只识别“秘密名 = 引号包裹的字面值”这一明显泄露形态；

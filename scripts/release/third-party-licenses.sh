@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate THIRD-PARTY-LICENSES.txt (docs/release.md §11).
+# Generate THIRD-PARTY-LICENSES.txt (docs/RELEASING.md §11).
 #
 # Identifier-level summary of every dependency the lockfile resolves, taken from
 # `cargo metadata --locked`: the same Cargo.lock always produces the same file.

@@ -41,7 +41,7 @@ QQMusicApi 用 Python 实现了 QQ 音乐接口的完整协议工作（请求签
 | **Windows / Linux** | ❌ 未适配 |
 
 「能生成」不等于「正式支持」：哪些平台随 Release 交付、资产如何成套打包，以
-[docs/release.md](docs/release.md) 为准。
+[docs/RELEASING.md](docs/RELEASING.md) 为准。
 
 ## 🚀 快速开始
 
@@ -132,7 +132,7 @@ boltffi pack android       # → dist/android 的 jniLibs
 * **[docs/ffi.md](docs/ffi.md)** —— BoltFFI 绑定生成、成套更新规则与调用示例
 * **[docs/testing.md](docs/testing.md)** —— 测试分层、真机只读与凭据纪律
 * **[docs/pending.md](docs/pending.md)** —— 待决清单与已验证边界
-* **[docs/release.md](docs/release.md)** —— 发布规则（唯一真源）
+* **[docs/RELEASING.md](docs/RELEASING.md)** —— 发布规则（唯一真源）
 * **[docs/history/](docs/history/)** —— 历史验证报告与取证记录
 
 ## 📄 许可证

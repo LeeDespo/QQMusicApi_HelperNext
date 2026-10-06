@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and lay out the macOS ARM64 stdio package (docs/release.md §4).
+# Build and lay out the macOS ARM64 stdio package (docs/RELEASING.md §4).
 #
 # Output in $RELEASE_DIR (default dist/release):
 #   qqmusic-helper-next-v<version>-macos-arm64.tar.gz
@@ -12,7 +12,7 @@ cd "$root"
 # with a different toolchain than the one the manifest records.
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 
-# A formal build is made from a clean commit (docs/release.md §9.2). The override
+# A formal build is made from a clean commit (docs/RELEASING.md §9.2). The override
 # exists so a local rehearsal of the packaging itself is possible.
 if [ -z "${ALLOW_DIRTY_TREE:-}" ] && [ -n "$(git status --porcelain)" ]; then
     echo "refusing to pack a formal artifact from a dirty tree (ALLOW_DIRTY_TREE=1 only rehearses)" >&2
