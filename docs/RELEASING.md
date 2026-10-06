@@ -503,6 +503,8 @@ Verify all assets with `SHA256SUMS`.
 
 每次 Release 的正文放在 `docs/release-notes/vX.Y.Z.md`（随 tag 一起进仓库、可评审），
 release job 用 `gh release create --notes-file` 直接读取；文件缺失即该次发布失败。
+发布时同步根 `CHANGELOG.md`：把 [Unreleased] 落为版本条目（日期用发布日），发布说明从对应
+条目取材；两者口径一致，不维护两份。
 
 ---
 

@@ -124,15 +124,13 @@ boltffi pack android       # → dist/android 的 jniLibs
 
 ## 📚 文档导航
 
-* **[AGENTS.md](AGENTS.md)** —— 仓库守则：任务路由、硬性规则、完成清单（开工先读）
-* **[docs/architecture.md](docs/architecture.md)** —— 分层与模块职责、边界体检
-* **[docs/development.md](docs/development.md)** —— 改动流程与新增接口检查表
-* **[docs/endpoints.md](docs/endpoints.md)** —— 接口清单：每个方法的上游 module/method、参数与回值
-* **[docs/parsing.md](docs/parsing.md)** —— 解析要点：平台档案、字段映射、设备身份等必读结论
-* **[docs/ffi.md](docs/ffi.md)** —— BoltFFI 绑定生成、成套更新规则与调用示例
-* **[docs/testing.md](docs/testing.md)** —— 测试分层、真机只读与凭据纪律
-* **[docs/pending.md](docs/pending.md)** —— 待决清单与已验证边界
-* **[docs/RELEASING.md](docs/RELEASING.md)** —— 发布规则（唯一真源）
+* **[docs/README.md](docs/README.md)** —— 文档门户：全部文档按主题索引
+* **[docs/endpoints.md](docs/endpoints.md)** —— 接口清单（当前接口事实）
+* **[docs/ffi.md](docs/ffi.md)** —— FFI 契约与成套更新规则
+* **[docs/pending.md](docs/pending.md)** —— 未完成能力与验证边界
+* **[docs/RELEASING.md](docs/RELEASING.md)** —— 发布规则（唯一发布真源）
+* **[CHANGELOG.md](CHANGELOG.md)** —— 对外变化记录
+* **[AGENTS.md](AGENTS.md)** —— 仓库守则（Agent / 贡献者开工先读）
 * **[docs/history/](docs/history/)** —— 历史验证报告与取证记录
 
 ## ⚠️ 用途声明
