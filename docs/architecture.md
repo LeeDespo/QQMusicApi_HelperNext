@@ -1,7 +1,9 @@
 # 架构：为什么这样分层
 
 本文回答两个问题：一次调用如何流过组件（数据流），以及每个模块管什么、禁止管什么（职责边界）。
-文末是按固定清单跑过的「当前边界体检」结果。改动方式见 [development.md](development.md)，
+按固定清单跑过的一次性「边界体检」快照见
+[history/repository-audit-2026-10-06.md](history/repository-audit-2026-10-06.md)，
+长期护栏是 `scripts/check_repository_rules.sh`。改动方式见 [development.md](development.md)，
 接口契约见 [endpoints.md](endpoints.md) 与 [parsing.md](parsing.md)。
 
 ## 1. 数据流
@@ -45,11 +47,11 @@ src/catalog.rs   src/port/*（移植层，      内建方法：
 ## 2. 三个分层决策，以及为什么
 
 **一个实现、两个调用面。** typed FFI 与 stdio 适配器都不是端点的第二份实现：stdio 的未知方法
-一律交给 `methods::dispatch`（`src/bin/stdio.rs:215-232`），FFI 包装经由 `api.rs` 的
+一律交给 `methods::dispatch`（`src/bin/stdio.rs` 主循环），FFI 包装经由 `api.rs` 的
 `call`/`port::call` 走同一个 `dispatch`。这样「CLI 能用、绑定里没有」这类漂移在结构上不可能发生，
-`api_surface_matches` 测试（`src/api.rs:555`）再把方法表与类型化包装钉死一次。
+`api_surface_matches` 测试（定义在 `src/api.rs`）再把方法表与类型化包装钉死一次。
 
-**协议层是「方法名 → 端点」的表，不是业务逻辑。** `methods::dispatch`（`src/methods.rs:480`）
+**协议层是「方法名 → 端点」的表，不是业务逻辑。** `methods::dispatch`（`src/methods.rs`）
 只做路由：先查既有表（`catalog_dispatch`，优先级最高），再试移植层（`port::dispatch`，因此移植的
 新方法永远不会遮蔽既有方法），最后是内建方法。`get_helper_info` 广告的方法列表是两者并集，
 宿主枚举到的就是全部能力。
@@ -68,7 +70,7 @@ port 层，而既有代码是已上线契约、不能被顺手改动——把两
 | `src/lib.rs` | 组合根：`initialize`/`configure`（首次生效后冻结，防止运行中挪走凭据目录）、`HelperError` 定义 | 不承载端点逻辑 |
 | `src/api.rs` | 类型化公开 API（`#[export]`）；协议信封 → 模型的 `parse` 适配；共享 `Upstream` 的唯一发放点 | 不新增第二个 HTTP agent；不为省事复制端点实现 |
 | `src/models.rs` | `#[data]` 数据模型，camelCase，一份定义同时服务 JSON 与 FFI | 字段不重排、不改名（FFI 按字段顺序编码） |
-| `src/methods.rs` | 方法表 `METHODS`、`dispatch` 路由、内建方法、版本常量（`COMPONENT_VERSION` 0.2.0 / `PROTOCOL_VERSION` 2） | 不把端点业务写进路由层；协议版本不轻易变动 |
+| `src/methods.rs` | 方法表 `METHODS`、`dispatch` 路由、内建方法、版本常量（数值以代码为准） | 不把端点业务写进路由层；协议版本不轻易变动 |
 | `src/catalog.rs` | 既有目录/榜单/歌词/取流/搜索端点的实现与解析 | 既有形状是契约，改前先读 `docs/parsing.md` 的结论 |
 | `src/port/*` | 参考实现新端点，一领域一文件，自带模型/包装/测试 | 不碰 `src/api.rs` 等既有文件；不遮蔽既有方法 |
 | `src/port/signed.rs` | `musics.fcg` 的 `zzc` 签名（SHA-1 移植，照抄参考实现，签名对不上直接回 `2000`） | 不「发明等价算法」；签名必须作用于实际发送的字节 |
@@ -92,25 +94,3 @@ port 层，而既有代码是已上线契约、不能被顺手改动——把两
    与 `#[export]`（或登记别名），测试失败即打回。
 5. **平台档案是按接口的实测结论，不是全局开关。** 选错档案不报错、只回空数据或风控码；
    规则见 [parsing.md](parsing.md) 第一节。
-
-## 5. 当前边界体检
-
-体检清单固定十项，纯检查、不改代码。以下结果来自 2026-10-06 的实际执行；其中第 1、8、10 项
-在 qrc 向量与冒烟取证 JSON 迁移落地后的工作区复跑：
-
-| # | 检查项 | 命令 / 依据 | 结果 |
-|---|---|---|---|
-| 1 | `api_surface_matches` 存在且可执行 | `cargo test` 全绿；测试在 `src/api.rs:555`（声明见 `src/api.rs:9-10`） | ✅ |
-| 2 | Upstream 只有一套 | `src/upstream.rs` 单文件；共享实例 `src/api.rs:19-33`；port 层经 `port::call`（`src/port/mod.rs:100-109`） | ✅ |
-| 3 | 凭据只有一套 | `src/credential.rs` 单文件（`for_directory`/`load`/`store`/`clear`） | ✅ |
-| 4 | guard 只有一套 | `src/guard.rs` 单文件；限流器与熔断器挂在共享 `Upstream` 上（`src/upstream.rs:91-92`） | ✅ |
-| 5 | 上游 HTTP 只在 `upstream.rs` | `grep -rn ureq src/`：命中 `upstream.rs`（agent）、`device.rs:205,347`（复用传入 agent）、`aria2.rs:494`（本地 loopback）、`login.rs`/`port/login_extra.rs`（仅错误类型匹配） | ✅ |
-| 6 | port/ 一领域一文件、三处登记 | 12 个领域文件 + `signed.rs`（zzc 签名支撑，无 `METHODS`）+ `mod.rs`；登记点 `src/port/mod.rs:20-32`（mod）、`:39`（all_methods）、`:66`（dispatch）；确定性测试 `:172-196` | ✅ |
-| 7 | 两个调用面一个实现 | `src/bin/stdio.rs:224` 与 `src/api.rs:49` 都汇入 `methods::dispatch`；`get_helper_info` 广告并集 | ✅ |
-| 8 | `src/` 无临时/数据文件 | `find src -name "*_tmp.*" -o -name "*.hex" -o -name "*.json"` | ✅ 无命中。QRC 已知答案向量已迁移至 `tests/fixtures/qrc/qrc-vector.hex`，`src/lib.rs:237`、`src/catalog.rs:1601`、`src/port/library_extra.rs:555` 三处 `include_str!` 已同步改路径，迁移后 `cargo test` 复跑三个向量测试仍绿（直接删除会破坏它们） |
-| 9 | 仓库卫生 | `git ls-files` 无 `dist/`、`target/`、`.zcodeignore` 条目；release 真源唯一：`docs/RELEASING.md` 存在、根目录无 `release_plan.md`、无 `docs/release.md` | ✅ |
-| 10 | 无凭据泄漏 | 对 tracked 及待入库文本文件宽松扫描 `qm_keyst|musickey|qimei16|qimei36|encrypt_uin` 后跟引号值：0 命中；7 个冒烟取证 JSON（`docs/history/evidence/2026-10-04/`）逐个 `grep -c` 同样为 0 | ✅ |
-
-未列入本体检的：`cargo fmt --check`。按仓库政策**任何人不得全仓跑 `cargo fmt`**，
-只允许对改动文件执行 `rustfmt --edition 2021 <文件>`（见 [development.md](development.md)），
-因此体检不含全仓格式断言。

@@ -193,13 +193,10 @@ QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1
 
 请求/回复顶层的 `id` 始终是请求关联标识。创建歌单、发表评论等响应的资源 `id` 在子进程协议中改放 `resultId`；例如创建歌单回复的 `resultId` 是 disstid，`dirid` 是目录 ID。FFI 直接调用的资源字段仍叫 `id`。
 
-### 已验证与剩余限制
+### 行为备注与验证边界
 
-- 2026-10-04 完成真实账号只读、分页、搜索类型、类型化模型及可逆写入验证；详见[接续报告](history/2026-10-04-continuation-verification.md)。
-- 2026-10-05 完成安卓宿主（NeuMusic）接入验证：本轮新增的分页/轮播批次方法与 `set_liked_by_id` 在真账号上通过（写仅对一首未喜欢的歌曲加/删各一次，前后快照一致）；详见 NeuMusic 接入报告（`Music_app/docs/helpernext-integration-2026-10-05.md`）。
-- 私信与 COS 上传仍是原工作流延期模块；手机 App MQTT 扫码也未移植。
-- 本轮按用户要求跳过所有登录/扫码测试，不查看截图。
-- 清空不喜欢列表仅验证获取 Token 的预检，不执行全量删除，以保留既有条目的时间和顺序。缺失 Token 或非零业务码会阻止删除。
+- 清空不喜欢列表需要获取 Token 的预检，缺失 Token 或非零业务码会阻止删除；组件不代宿主决定是否清空。
 - `fetch_other_versions` 的真实样本可能为空；无附加翻译/词典的 `null` 归一为空列表，错误类型仍报错。
+- 各轮真账号验证的取证记录见 [docs/history/](history/)；尚未验证的能力与边界见 [pending.md](pending.md)。
 - `songTsElems`/`hashTagList`/`iconList`/`subComments` 等任意 JSON 字段在 FFI 中保留为 JSON 文本；子进程仍返回对象/数组。
 - 加密取流的 `ekey`/`purl` 无内容时保留上游结果；宿主应根据授权结果选择普通音质。
