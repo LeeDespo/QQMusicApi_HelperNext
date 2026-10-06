@@ -90,10 +90,24 @@ jobs:
         with:
           targets: ${{ env.ANDROID_TARGETS }}
 
-      - uses: android-actions/setup-android@v3
-
+      # The runner image already carries the Android SDK. The setup-android
+      # action is deliberately avoided: its legacy `sdkmanager tools` call now
+      # fails, because that package was retired from the SDK repository.
       - name: Install Android NDK ${{ env.NDK_VERSION }}
-        run: yes | sdkmanager --install "ndk;$NDK_VERSION"
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "$sdkmanager" ]; then
+            sdkmanager="$(find "$sdk_root/cmdline-tools" -maxdepth 3 -name sdkmanager -type f | head -1)"
+          fi
+          echo "Installing NDK $NDK_VERSION with $sdkmanager (SDK root: $sdk_root)"
+          yes | ANDROID_SDK_ROOT="$sdk_root" ANDROID_HOME="$sdk_root" \
+            "$sdkmanager" --install "ndk;$NDK_VERSION"
+          {
+            echo "ANDROID_HOME=$sdk_root"
+            echo "ANDROID_SDK_ROOT=$sdk_root"
+            echo "ANDROID_NDK_HOME=$sdk_root/ndk/$NDK_VERSION"
+          } >> "$GITHUB_ENV"
 
       - name: Cache BoltFFI CLI
         id: boltffi
@@ -106,9 +120,8 @@ jobs:
         if: steps.boltffi.outputs.cache-hit != 'true'
         run: cargo install boltffi_cli --version "$BOLTFFI_VERSION" --locked
 
+      # ANDROID_HOME / ANDROID_NDK_HOME come from the install step above.
       - name: Pack
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
         run: bash scripts/release/pack-android.sh
 
       - uses: actions/upload-artifact@v4
