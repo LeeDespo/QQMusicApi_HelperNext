@@ -1598,7 +1598,7 @@ mod tests {
         let kana = "[kana:1かな]\n[00:01.00]漢";
         assert_eq!(decode_lyric_text(kana).as_deref(), Some(kana));
 
-        let hex = include_str!("qrc_vector_tmp.hex").trim();
+        let hex = include_str!("../tests/fixtures/qrc/qrc-vector.hex").trim();
         let qrc = decode_lyric_text(hex).expect("official encrypted source fixture decodes");
         assert!(!crate::qrc::parse(&qrc).is_empty());
 

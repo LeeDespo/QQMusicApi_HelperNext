@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn encrypted_multi_style_lyrics_use_the_existing_qrc_decoder() {
-        let cipher = include_str!("../qrc_vector_tmp.hex").trim();
+        let cipher = include_str!("../../tests/fixtures/qrc/qrc-vector.hex").trim();
         let payload = multi_style_payload(&json!({"lyrics":[{
             "style":1,"styleName":"译文","lyric":cipher,"timestamp":99
         }]}))

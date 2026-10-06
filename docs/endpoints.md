@@ -195,7 +195,7 @@ QQ 音乐的逐字数据只在**加密路**上：`GetPlayLyricInfo` 带 `crypt:1
 
 ### 已验证与剩余限制
 
-- 2026-10-04 完成真实账号只读、分页、搜索类型、类型化模型及可逆写入验证；详见[接续报告](continuation-verification-2026-10-04.md)。
+- 2026-10-04 完成真实账号只读、分页、搜索类型、类型化模型及可逆写入验证；详见[接续报告](history/2026-10-04-continuation-verification.md)。
 - 2026-10-05 完成安卓宿主（NeuMusic）接入验证：本轮新增的分页/轮播批次方法与 `set_liked_by_id` 在真账号上通过（写仅对一首未喜欢的歌曲加/删各一次，前后快照一致）；详见 NeuMusic 接入报告（`Music_app/docs/helpernext-integration-2026-10-05.md`）。
 - 私信与 COS 上传仍是原工作流延期模块；手机 App MQTT 扫码也未移植。
 - 本轮按用户要求跳过所有登录/扫码测试，不查看截图。

@@ -4,7 +4,7 @@
 2026-10-05 又完成安卓宿主（NeuMusic）接入：本轮新增的分页/轮播批次/写回执方法经真账号只读与一次可逆写验证，
 四 ABI 打包与 16 KB 对齐检查通过；接入过程中的取舍与分工记录在宿主侧的接入报告
 （`Music_app/docs/helpernext-integration-2026-10-05.md`）。
-2026-10-04 那轮的结果、复原证据与中途故障记录见[接续验证报告](continuation-verification-2026-10-04.md)。
+2026-10-04 那轮的结果、复原证据与中途故障记录见[接续验证报告](history/2026-10-04-continuation-verification.md)。
 
 ## 原工作流明确延期的模块
 

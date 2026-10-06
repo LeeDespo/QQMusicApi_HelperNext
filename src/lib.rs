@@ -234,7 +234,7 @@ mod tests {
 mod qrc_vector_check {
     #[test]
     fn the_official_vector_decrypts_to_the_expected_document() {
-        let hex = include_str!("qrc_vector_tmp.hex").trim();
+        let hex = include_str!("../tests/fixtures/qrc/qrc-vector.hex").trim();
         let document = crate::qrc::decrypt_hex(hex).expect("decrypts");
         // JS `.length` counts UTF-16 units; Rust counts bytes. CJK makes them differ.
         assert_eq!(

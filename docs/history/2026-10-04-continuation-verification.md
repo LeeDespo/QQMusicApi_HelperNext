@@ -65,11 +65,11 @@
 | `fav_playlist` / `unfav_playlist` | 临时收藏公开歌单 7039749142 | 收藏后读取可见；取消后收藏歌单 ID 集合与基线一致 |
 | `CancelAllDislike` Token 预检 | 请求 `ISOnlyGetToken:true`，不发送删除命令 | 预检成功，既有条目未删除，Token 未输出 |
 
-只读明细：[只读测试结果](read-smoke-2026-10-04.json)。
+只读明细：[只读测试结果](evidence/2026-10-04/read-smoke-2026-10-04.json)。
 
-最后成功写入明细：[最终写测试结果](write-smoke-final-2026-10-04.json)。
+最后成功写入明细：[最终写测试结果](evidence/2026-10-04/write-smoke-final-2026-10-04.json)。
 中途编码失败时，远端操作已生效而解析失败；通过唯一名称读回找到了资源并清理。
-早期操作与人工诊断也保留在 [初始记录](write-smoke-initial-2026-10-04.json)、[恢复记录](write-smoke-recovery-2026-10-04.json)、[中间记录](write-smoke-2026-10-04.json)、[首次成功记录](write-smoke-first-success-2026-10-04.json)以及[删除评论契约复核](write-smoke-comment-contract-2026-10-04.json)，不要把失败回复当成“没有写入”。
+早期操作与人工诊断也保留在 [初始记录](evidence/2026-10-04/write-smoke-initial-2026-10-04.json)、[恢复记录](evidence/2026-10-04/write-smoke-recovery-2026-10-04.json)、[中间记录](evidence/2026-10-04/write-smoke-2026-10-04.json)、[首次成功记录](evidence/2026-10-04/write-smoke-first-success-2026-10-04.json)以及[删除评论契约复核](evidence/2026-10-04/write-smoke-comment-contract-2026-10-04.json)，不要把失败回复当成“没有写入”。
 删除评论允许成功响应省略 SubCode，最后一次验证额外通过前后读回确认资源消失。
 以上复原针对成员集合和临时资源；没有删除原有收藏、喜欢或不喜欢条目来测试，保留其原始时间与顺序。
 
@@ -81,7 +81,7 @@ VIP 公开信息返回成功不能证明会话有效。凭据没有打印、纳�
 - 全量 `clear_dislike_songs` 未执行：已有 9 个原始不喜欢条目，重建会改变时间和顺序，故只验证预检、参数与失败保护。
 - 指定用户喜欢接口用本账号的显式 `euin` 验证；没有额外他人账号/隐私限制样本。
 - 部分内容分支随曲目而为空；真实读取通过不能替代所有曲目的授权与非空样本保证。
-- 私信/COS/手机客户端 MQTT 属于原工作流延期模块；剩余边界见 [pending.md](pending.md)。
+- 私信/COS/手机客户端 MQTT 属于原工作流延期模块；剩余边界见 [pending.md](../pending.md)。
 - 全程没有查看截图、测试登录或发送真实短信。未更新或发布宿主 App。
 
 ## 复跑入口
