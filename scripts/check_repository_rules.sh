@@ -65,6 +65,50 @@ else
     printf '%s\n' "$hits"
 fi
 
+# 7. 活文档（README / AGENTS / docs 顶层）的相对链接必须可解析。
+#    history/ 的历史取证记录不在检查范围；锚点链接与外链跳过。
+link_failures=""
+for doc in README.md AGENTS.md docs/*.md; do
+    doc_dir="$(dirname "$doc")"
+    targets="$(grep -o '](\([^)]*\))' "$doc" 2>/dev/null | sed -e 's/^\](//' -e 's/)$//' || true)"
+    while IFS= read -r target; do
+        [ -z "$target" ] && continue
+        case "$target" in
+            http://*|https://*|mailto:*|'#'*) continue ;;
+        esac
+        path="${target%%#*}"
+        path="${path%% *}"
+        [ -z "$path" ] && continue
+        if [ ! -e "$doc_dir/$path" ]; then
+            link_failures="$link_failures\n  $doc -> $target"
+        fi
+    done <<< "$targets"
+done
+if [ -z "$link_failures" ]; then
+    pass 'relative links in live docs resolve'
+else
+    fail 'unresolved relative links in live docs:'
+    printf '%b\n' "$link_failures"
+fi
+
+# 8. 活文档不得引用不可导航的本机宿主路径（跨仓引用用 GitHub 链接或 history 摘要）。
+hits="$(grep -rn 'Music_app' README.md AGENTS.md docs/*.md || true)"
+if [ -z "$hits" ]; then
+    pass 'live docs reference no local host paths'
+else
+    fail 'live docs reference local host paths:'
+    printf '%s\n' "$hits"
+fi
+
+# 9. 许可证表述一致：Cargo.toml 与 README 均为 GPL-3.0-or-later，LICENSE 为 GPL 文本。
+if grep -q 'license = "GPL-3.0-or-later"' Cargo.toml \
+   && grep -q 'GPL-3.0-or-later' README.md \
+   && head -3 LICENSE | grep -qi 'GNU GENERAL PUBLIC LICENSE'; then
+    pass 'license wording consistent (Cargo.toml / README / LICENSE)'
+else
+    fail 'license wording inconsistent across Cargo.toml / README / LICENSE'
+fi
+
 if [ "$failures" -eq 0 ]; then
     printf 'all repository rule checks passed\n'
     exit 0

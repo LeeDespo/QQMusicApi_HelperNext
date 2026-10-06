@@ -1,6 +1,29 @@
+# Rust / build output
 target/
 dist/
-.DS_Store
-*.tmp
+
+# credentials / environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+
+# local agent / editor tools
 .zcode/
 .zcodeignore
+.codex/
+.cursor/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# editor / patch leftovers
+*.tmp
+*.bak
+*.orig
+*.rej
