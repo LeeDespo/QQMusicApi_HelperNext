@@ -9,6 +9,8 @@
 //! ```text
 //! $ echo '{"id":"1","method":"get_helper_info","params":{}}' | qqmusic-helper-next
 //! {"id":"1","ok":true,"helper":{"helperVersion":"0.2.0",…}}
+//! $ qqmusic-helper-next --version
+//! qqmusic-helper-next 0.2.0 (protocol 2)
 //! ```
 //!
 //! stdout is reserved for protocol JSON; diagnostics go to stderr. The
@@ -44,6 +46,17 @@ fn credential_directory() -> std::path::PathBuf {
 }
 
 fn main() {
+    // A release smoke asks for the version before, and without, any host
+    // configuration: no credential directory is read or created.
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!(
+            "qqmusic-helper-next {} (protocol {})",
+            methods::COMPONENT_VERSION,
+            methods::PROTOCOL_VERSION
+        );
+        return;
+    }
+
     let data_dir = credential_directory();
     configure(Configuration {
         data_dir: data_dir.to_string_lossy().to_string(),

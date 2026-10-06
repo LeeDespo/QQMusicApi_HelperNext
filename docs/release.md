@@ -9,8 +9,8 @@
 > 当前发布范围：**macOS ARM64 stdio 子进程 + Android BoltFFI**
 > 暂不发布：Windows、Linux、Apple FFI（macOS/iOS XCFramework）、**wasm**（见 §2.2）
 >
-> 语气约定：本文所有「必须 / 禁止 / 只」都是现行有效规则；§10 的 release CI 是
-> `.github/workflows/release.yml` 的实现规格——该文件**尚未创建**，实现前不得宣称有自动发布。
+> 语气约定：本文所有「必须 / 禁止 / 只」都是现行有效规则；§10 描述的 release CI
+> 已由 `.github/workflows/release.yml` 与 `scripts/release/` 落地（见 §10、§17）。
 
 ---
 
@@ -134,9 +134,9 @@ qqmusic-helper-next-v0.2.0-macos-arm64/
 
 - 当前仓库只有一个 binary target（`Cargo.toml` 的 `[[bin]] qqmusic-helper-next`），
   包内只含这一个可执行文件；
-- **任何文档或注释不得描述不存在的 binary。** `Cargo.toml` 头部注释仍残留对
-  `qqmusic-helper-next-cli` 的描述（该 target 不存在），属于待修正残留；
-  在其被删除或真的新增 `src/bin/cli.rs` 之前，以本条为准：不发布、不宣称 cli；
+- **任何文档或注释不得描述不存在的 binary。** `Cargo.toml` 头部对该残留的
+  `qqmusic-helper-next-cli` 描述已在 0.2.0 发布前删除；在以本条为准的前提下，
+  不发布、不宣称 cli；
 - 不发布 `.rlib` 或裸 `.a` 当作通用二进制。
 
 ### 4.3 manifest.json
@@ -321,16 +321,20 @@ push tag vX.Y.Z → GitHub Actions → checkout tag → test → build → packa
 
 ---
 
-## 10. Release CI（release.yml 实现规格）
+## 10. Release CI（已实现）
 
-**实施状态：`.github/workflows/release.yml` 尚未创建。** 本节是它的实现规格；
-实现前必须先完成两个前置项：
+**实施状态：已落地。** `.github/workflows/release.yml` 按本节结构实现；打包逻辑在
+`scripts/release/`（`pack-macos.sh`、`pack-android.sh`、`assemble-release.sh`、
+`third-party-licenses.sh`、`check_16kb_pages.py`），本地可用 `ALLOW_DIRTY_TREE=1`
+以同一批脚本干跑演练。
 
-1. **stdio `--version`**：`src/bin/stdio.rs` 目前不解析任何命令行参数，`--version` 会当普通
-   请求失败。要么给二进制补上参数解析，要么规格内的版本 smoke 改用
-   `get_helper_info`（`helperVersion` 字段）实现——实现者二选一，并在本节回填实际做法；
-2. **真实 tag 与 secret 环境**：实现依赖真实 tag 推送与 GitHub Actions 环境，没有环境先行落地
-   只会得到跑不通的工作流。
+本节原先要求的两个前置项，实际做法回填如下：
+
+1. **stdio `--version`**：`src/bin/stdio.rs` 已支持 `--version`——在读取或创建任何宿主配置
+   之前打印组件与协议版本并退出 0（`tests/stdio_version.rs` 钉住该契约）；macOS job 与包内 smoke
+   都用它，不再需要 `get_helper_info` 解析方案；
+2. **真实 tag 与 secret 环境**：release job 用 `GITHUB_TOKEN`（workflow `permissions: contents: write`）
+   创建 Release，不需要额外 secret。
 
 ### 10.1 Trigger
 
@@ -355,14 +359,15 @@ macos       android
 1. 校验 tag = `Cargo.toml` version（§9.1）；
 2. `cargo test --all-targets`（全离线集合；真实账号 smoke 是独立人工/受控流程，
    **不得在公开 CI 运行凭据**，L4 规则见 [testing.md](testing.md)）；
-3. `boltffi check`，加上仓库自身的 API surface 检查（`api_surface_matches` 已含在测试里）。
+3. `boltffi check --android`（Apple target 在 Linux runner 上无法检查，由 macOS job 的真实构建
+   与 smoke 覆盖），加上仓库自身的 API surface 检查（`api_surface_matches` 已含在测试里）。
 
 ### 10.4 macOS build job
 
 - Runner `macos`，只构建 `aarch64-apple-darwin`；
 - `cargo build --release --bin qqmusic-helper-next`，`file` 确认产物是
   `Mach-O 64-bit executable arm64`；
-- 最小 smoke：`--version`（或前置项选定的 `get_helper_info` 方案），以及 stdin 发送
+- 最小 smoke：`--version`（做法见 §10 前置项回填），以及 stdin 发送
   `{"id":"1","method":"get_helper_info","params":{}}`，必须回
   `ok = true`、`helperVersion` = 当前版本、`protocolVersion` = 2。通过后才允许打包。
 
@@ -390,7 +395,9 @@ macos       android
 
 - 本仓库许可证为 **GPL-3.0-or-later**（与 QQMusicApi 一致：本项目是它的 Rust 移植）；
 - 每个二进制包内必须携带 `LICENSE` 与 `THIRD-PARTY-LICENSES.txt`；
-- `THIRD-PARTY-LICENSES.txt` 由 CI 自动生成（`cargo-about` 或同类工具），不长期手工维护；
+- `THIRD-PARTY-LICENSES.txt` 由 `scripts/release/third-party-licenses.sh` 从
+  `cargo metadata --locked` 自动生成（标识符级汇总：依赖名、版本、声明的许可证、仓库地址；
+  不内嵌各许可证全文），不长期手工维护；
 - Release 与 Git tag 一一对应，GitHub 自动提供的 source archives 与二进制天然同源。
 
 ---
@@ -492,6 +499,9 @@ Windows, Linux, Apple FFI and wasm are not currently released or supported.
 Verify all assets with `SHA256SUMS`.
 ```
 
+每次 Release 的正文放在 `docs/release-notes/vX.Y.Z.md`（随 tag 一起进仓库、可评审），
+release job 用 `gh release create --notes-file` 直接读取；文件缺失即该次发布失败。
+
 ---
 
 ## 15. 禁止事项
@@ -566,13 +576,15 @@ NeuMusic 正式版本依赖 source.patch
 
 | 事项 | 状态 | 依赖 |
 |---|---|---|
-| `.github/workflows/release.yml` | 未创建 | §10 两个前置项（stdio `--version` 或改用 `get_helper_info`；真实 tag/secret 环境） |
-| macOS / Android 打包与 manifest/SHA256SUMS 脚本 | 未创建 | 随 release.yml 或先行脚本化 |
-| NeuMusic 切换 lock + Release 下载 | 未切换 | 本仓库首个正式 Release |
-| `Cargo.toml` 头部残留的 `qqmusic-helper-next-cli` 注释 | 待修正 | 代码侧提交，与本文件 §4.2 一并核对 |
+| `.github/workflows/release.yml` | 已创建（validate → macos → android → release） | — |
+| macOS / Android 打包与 manifest/SHA256SUMS/许可证脚本 | 已创建（`scripts/release/`） | — |
+| `Cargo.toml` 头部残留的 `qqmusic-helper-next-cli` 注释 | 已修正 | — |
+| NeuMusic 切换 lock + Release 下载 | 未切换 | 本仓库首个正式 Release；宿主侧实现见 §12 |
+| 消费端 `helpernext.lock.json` 约定 | 未落地 | 宿主仓库侧实现，见 §12 |
 
-在这之前，组件的分发维持现状：NeuMusic 从本仓库构建产物接入，macOS 宿主使用本地构建的
-stdio 二进制——但 §9 的 tag/clean-tree/成套纪律从现在起对任何手工分发同样生效。
+自动发布落地后，分发方式仍维持现状：NeuMusic 从本仓库构建产物接入，macOS 宿主使用本地构建的
+stdio 二进制；改为「下载 Release 资产 + 校验 SHA256」是宿主侧的下一步（§12）。§9 的
+tag/clean-tree/成套纪律对任何分发方式同样生效。
 
 ---
 

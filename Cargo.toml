@@ -10,11 +10,9 @@ repository = "https://github.com/LeeDespo/QQMusicApi_HelperNext"
 name = "qqmusic_api_helper_next"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
-# Two binaries, one product:
-#   qqmusic-helper-next  — the line-based JSON adapter an app drives as a child
-#                          process (this is what the macOS player uses);
-#   qqmusic-helper-next-cli — a small human-facing CLI for poking the component
-#                          by hand while developing.
+# One binary, one product: the line-based JSON adapter an app drives as a child
+# process (this is what the macOS player uses; `--version` prints the component
+# and protocol version). The `[lib]` targets beside it are the FFI surface.
 [[bin]]
 name = "qqmusic-helper-next"
 path = "src/bin/stdio.rs"

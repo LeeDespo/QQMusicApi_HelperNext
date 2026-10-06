@@ -1,0 +1,156 @@
+name: Release
+
+# A release is a tag, and is only ever built from one (docs/release.md §9.3).
+on:
+  push:
+    tags: ["v*"]
+
+# gh release create needs to write the release.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BOLTFFI_VERSION: "0.31.0"
+  NDK_VERSION: "27.3.13750724"
+  ANDROID_TARGETS: "aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android"
+
+jobs:
+  validate:
+    name: tag = component version, tests, BoltFFI surface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Tag matches Cargo.toml version
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          version = tomllib.load(open("Cargo.toml", "rb"))["package"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          if tag != f"v{version}":
+              raise SystemExit(f"tag {tag} does not match Cargo.toml version {version}")
+          print(f"{tag} == component {version}")
+          PY
+
+      - name: Working tree is clean
+        run: test -z "$(git status --porcelain)"
+
+      - name: cargo test --all-targets
+        run: cargo test --all-targets
+
+      - name: Cache BoltFFI CLI
+        id: boltffi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-${{ env.BOLTFFI_VERSION }}
+
+      - name: Install BoltFFI CLI ${{ env.BOLTFFI_VERSION }}
+        if: steps.boltffi.outputs.cache-hit != 'true'
+        run: cargo install boltffi_cli --version "$BOLTFFI_VERSION" --locked
+
+      # Apple targets cannot be checked on Linux; the macOS job builds its own.
+      - name: BoltFFI surface check
+        run: boltffi check --android
+
+  macos:
+    name: macOS ARM64 stdio package
+    needs: validate
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build, smoke and pack
+        run: bash scripts/release/pack-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helpernext-macos
+          path: |
+            dist/release/*.tar.gz
+            dist/release/THIRD-PARTY-LICENSES.txt
+            dist/release/toolchain-macos.json
+          if-no-files-found: error
+
+  android:
+    name: Android BoltFFI package (4 ABIs)
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.ANDROID_TARGETS }}
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK ${{ env.NDK_VERSION }}
+        run: yes | sdkmanager --install "ndk;$NDK_VERSION"
+
+      - name: Cache BoltFFI CLI
+        id: boltffi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-${{ env.BOLTFFI_VERSION }}
+
+      - name: Install BoltFFI CLI ${{ env.BOLTFFI_VERSION }}
+        if: steps.boltffi.outputs.cache-hit != 'true'
+        run: cargo install boltffi_cli --version "$BOLTFFI_VERSION" --locked
+
+      - name: Pack
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: bash scripts/release/pack-android.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helpernext-android
+          path: |
+            dist/release/*.zip
+            dist/release/THIRD-PARTY-LICENSES.txt
+            dist/release/toolchain-android.json
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [macos, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Working tree is clean
+        run: test -z "$(git status --porcelain)"
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist/release
+
+      - name: Assemble release-manifest.json and SHA256SUMS
+        run: bash scripts/release/assemble-release.sh
+
+      - name: Verify every checksum before publishing
+        run: cd dist/release && sha256sum -c SHA256SUMS
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "QQMusicApi_HelperNext ${GITHUB_REF_NAME}" \
+            --notes-file "docs/release-notes/${GITHUB_REF_NAME}.md" \
+            "dist/release/qqmusic-helper-next-v${version}-macos-arm64.tar.gz" \
+            "dist/release/qqmusic-helper-next-v${version}-android.zip" \
+            "dist/release/release-manifest.json" \
+            "dist/release/SHA256SUMS" \
+            "dist/release/THIRD-PARTY-LICENSES.txt"
