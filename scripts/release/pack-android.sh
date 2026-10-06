@@ -55,6 +55,7 @@ mkdir -p "$stage"
 cp -R dist/android/kotlin "$stage/kotlin"
 cp -R dist/android/jniLibs "$stage/jniLibs"
 cp LICENSE "$stage/LICENSE"
+cp NOTICE "$stage/NOTICE"
 cp "$release_dir/THIRD-PARTY-LICENSES.txt" "$stage/THIRD-PARTY-LICENSES.txt"
 
 python3 - "$stage" "$version" "$protocol" "$ndk_version" "$boltffi_version" <<'PY'

@@ -70,7 +70,9 @@ enabled = false
 preview_prune_unsupported = false
 
 [targets.wasm]
-enabled = true
+# 未适配、未验证：保持关闭，避免被误读为受支持的平台（docs/RELEASING.md §2.2/§13.2）。
+# 启动 wasm 适配时再打开，并先补工具链与验证记录。
+enabled = false
 triple = "wasm32-unknown-unknown"
 profile = "release"
 output = "dist/wasm"

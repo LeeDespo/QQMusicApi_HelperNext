@@ -79,10 +79,10 @@ Rust .rlib
 - Windows / Linux 尚未完成适配与验证，不构建、不上传、不宣称支持（§13）；
 - `boltffi.toml` 的 `[targets.apple]` 配置为 `include_macos = false`，macOS 消费方式以
   `qqmusic-helper-next` stdio 子进程为主（§13.1）；
-- **wasm**：`boltffi.toml` 的 `[targets.wasm] enabled = true` 只是生成器配置——本机未安装
-  `wasm32-unknown-unknown` 工具链、`src/` 没有任何 wasm 相关代码、也没有任何验证记录。
-  wasm 处于「仅配置、未适配、未验证」状态，**任何人不得在 README、Release Notes 或其他文档中
-  宣称支持 wasm**；
+- **wasm**：`boltffi.toml` 的 `[targets.wasm]` 已关闭（`enabled = false`，2026-10-07 起）——
+  本机未安装 `wasm32-unknown-unknown` 工具链、`src/` 没有任何 wasm 相关代码、也没有任何验证记录。
+  wasm 处于「未适配、未验证」状态，**任何人不得在 README、Release Notes 或其他文档中
+  宣称支持 wasm**；启动适配时重新打开配置，并在本节回填工具链与验证方式；
 - 未经过真实验证的平台不出现在正式 Release 中。以后新增平台时单独扩展本文的范围章节，不提前
   生成「看起来支持」的产物。
 
@@ -126,6 +126,7 @@ THIRD-PARTY-LICENSES.txt
 qqmusic-helper-next-v0.2.0-macos-arm64/
 ├── qqmusic-helper-next      # 唯一正式 executable（src/bin/stdio.rs）
 ├── LICENSE
+├── NOTICE
 ├── THIRD-PARTY-LICENSES.txt
 └── manifest.json
 ```
@@ -193,6 +194,7 @@ qqmusic-helper-next-v0.2.0-android/
 │   ├── x86/libqqmusic_api_helper_next.so
 │   └── x86_64/libqqmusic_api_helper_next.so
 ├── LICENSE
+├── NOTICE
 ├── THIRD-PARTY-LICENSES.txt
 └── manifest.json
 ```
@@ -394,7 +396,7 @@ macos       android
 ## 11. GPL 与许可证
 
 - 本仓库许可证为 **GPL-3.0-or-later**（与 QQMusicApi 一致：本项目是它的 Rust 移植）；
-- 每个二进制包内必须携带 `LICENSE` 与 `THIRD-PARTY-LICENSES.txt`；
+- 每个二进制包内必须携带 `LICENSE`、`NOTICE` 与 `THIRD-PARTY-LICENSES.txt`；
 - `THIRD-PARTY-LICENSES.txt` 由 `scripts/release/third-party-licenses.sh` 从
   `cargo metadata --locked` 自动生成（标识符级汇总：依赖名、版本、声明的许可证、仓库地址；
   不内嵌各许可证全文），不长期手工维护；
@@ -449,8 +451,8 @@ Swift binding、ABI 与真实宿主的验证；验证完成前不进 Release。
 
 ### 13.2 wasm
 
-见 §2.2：仅 `boltffi.toml` 生成配置，无工具链、无代码、无验证。不构建、不上传、
-不宣称支持。适配工作启动时先在本节回填工具链与验证方式。
+见 §2.2：`boltffi.toml` 配置已关闭（`enabled = false`），无工具链、无代码、无验证。
+不构建、不上传、不宣称支持。适配工作启动时重新打开配置，并在本节回填工具链与验证方式。
 
 ### 13.3 Windows / Linux
 

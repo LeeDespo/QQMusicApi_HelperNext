@@ -1,0 +1,25 @@
+QQMusicApi_HelperNext — 第三方来源与项目关系声明
+================================================
+
+1. 本项目
+   QQMusicApi_HelperNext —— QQ 音乐客户端接口的 Rust 跨平台组件。
+   许可证：GPL-3.0-or-later（见 LICENSE）。
+
+2. 主要协议 / 接口研究来源
+   QQMusicApi（https://github.com/L-1124/QQMusicApi），GPL-3.0-or-later。
+   本项目基于其接口认知、协议行为与实现经验进行 Rust 移植 / 重新实现，
+   不是对上游代码的逐行翻译。
+
+3. 非官方关系
+   本项目与腾讯、QQ、QQ音乐无任何官方关联，也不是腾讯的产品，未获得其认可。
+   QQ、QQ音乐及相关名称、商标归其各自权利人所有；本项目中的使用仅为描述
+   互操作对象，不构成商标授权。
+
+4. 使用者责任
+   软件许可证只涉及本项目代码。使用本项目不代表获得 QQ 音乐服务、API、
+   音乐内容、商标或数据的任何额外授权；使用者须自行确保其行为符合相关
+   服务条款、版权规定及适用法律。
+
+5. 其他第三方依赖
+   以 Cargo.toml / Cargo.lock 为准；随发布包提供的 THIRD-PARTY-LICENSES.txt
+   是按锁文件生成的许可证汇总（scripts/release/third-party-licenses.sh）。

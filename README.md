@@ -35,9 +35,9 @@ QQMusicApi 用 Python 实现了 QQ 音乐接口的完整协议工作（请求签
 |---|---|
 | **stdio 子进程** `qqmusic-helper-next`（macOS ARM64） | ✅ **正式**：一行一个 JSON 的子进程协议，macOS 宿主的当前消费方式，也是 Release 的 macOS 交付面；协议行为有测试覆盖 |
 | **Android FFI**（BoltFFI，四 ABI） | ✅ **正式**：0.2.0 绑定与 JNI 库经 NeuMusic 集成并完成真账号只读与一次可逆写验证；四 ABI 编译与 16 KB 页对齐检查通过 |
-| **macOS Swift typed FFI** | ⚠️ **在用、待成套替换**：现有安装仍是 0.1.0 产物；0.2.0 绑定已生成；类型检查与真实 FFI 程序验证记录在宿主侧接入报告（`Music_app/docs/helpernext-integration-2026-10-05.md`）。不随 Release 发布（`include_macos = false`） |
+| **macOS Swift typed FFI** | ⚠️ **在用、待成套替换**：现有安装仍是 0.1.0 产物；0.2.0 绑定已生成，类型检查与真实 FFI 程序验证已在宿主侧完成（宿主仓库维护接入记录）。不随 Release 发布（`include_macos = false`） |
 | **iOS / Apple XCFramework** | ❌ 绑定可生成，但无验证记录，不随 Release 发布 |
-| **wasm** | ❌ 仅 `boltffi.toml` 生成配置（`wasm32-unknown-unknown`）：无工具链、无适配代码、无验证记录，不得宣称支持 |
+| **wasm** | ❌ `boltffi.toml` 配置已关闭（`enabled = false`）：无工具链、无适配代码、无验证记录，不得宣称支持；启动适配时再打开 |
 | **Windows / Linux** | ❌ 未适配 |
 
 「能生成」不等于「正式支持」：哪些平台随 Release 交付、资产如何成套打包，以
@@ -135,18 +135,24 @@ boltffi pack android       # → dist/android 的 jniLibs
 * **[docs/RELEASING.md](docs/RELEASING.md)** —— 发布规则（唯一真源）
 * **[docs/history/](docs/history/)** —— 历史验证报告与取证记录
 
-## 📄 许可证
+## ⚠️ 用途声明
 
-本项目采用 **[GNU General Public License v3.0 or later](LICENSE)**，与 QQMusicApi 保持一致——
-本项目是它的 Rust 移植，协议工作与接口认知来自该项目。
+本项目基于 QQMusicApi 对 QQ 音乐客户端接口行为的研究与实现，仅用于技术研究、学习、
+个人使用及互操作性验证。
 
-本项目仅用于对技术可行性的探索及研究，请勿将其用于任何商业用途或侵犯版权的行为。
+项目作者不鼓励、亦不认可将本项目用于商业服务、批量数据获取、版权内容再分发或其他可能
+侵犯腾讯、QQ 音乐及相关权利人权益的用途。请尊重版权并支持正版。
 
-## ⚠️ 免责声明
+本项目的软件代码依据 **GNU GPL v3.0 or later** 提供；上述用途声明表达项目定位与作者立场，
+不改变 GPL-3.0-or-later 本身授予的权利。使用者须自行确保其行为符合相关服务条款、
+版权规定及适用法律。
 
-由于使用本项目产生的包括由于本协议或由于使用或无法使用本项目而引起的任何性质的任何直接、间接、特殊、
-偶然或结果性损害（包括但不限于因商誉损失、停工、计算机故障或故障引起的损害赔偿，或任何及所有其他商业
-损害或损失）由使用者负责。
+## 📄 许可证与第三方声明
+
+* 软件许可证：**[GNU General Public License v3.0 or later](LICENSE)**，与 [QQMusicApi](https://github.com/L-1124/QQMusicApi)
+  保持一致——本项目是它的 Rust 移植，协议工作与接口认知来自该项目。
+* 第三方来源、非官方关系与权利边界见根目录 [NOTICE](NOTICE)；依赖的许可证汇总随发布包
+  携带（`THIRD-PARTY-LICENSES.txt`，由 `scripts/release/third-party-licenses.sh` 生成）。
 
 ## 👥 致谢
 

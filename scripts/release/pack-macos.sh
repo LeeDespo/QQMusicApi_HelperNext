@@ -34,6 +34,7 @@ rm -rf "$stage"
 mkdir -p "$stage"
 cp "target/$target/release/qqmusic-helper-next" "$stage/qqmusic-helper-next"
 cp LICENSE "$stage/LICENSE"
+cp NOTICE "$stage/NOTICE"
 cp "$release_dir/THIRD-PARTY-LICENSES.txt" "$stage/THIRD-PARTY-LICENSES.txt"
 
 binary="$stage/qqmusic-helper-next"
