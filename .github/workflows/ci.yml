@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    name: cargo test + clippy + repository rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: cargo test
+        run: cargo test --all-targets
+
+      # 先逐步引入：暂不加 -D warnings，待告警清零后再收紧为必需步骤。
+      # 按仓库规则不放 cargo fmt --check：只允许对改动文件跑 rustfmt --edition 2021 <文件>。
+      - name: cargo clippy
+        run: cargo clippy --all-targets
+
+      - name: Repository structure rules
+        run: bash scripts/check_repository_rules.sh
