@@ -173,7 +173,8 @@ pub fn import_credential_with_encrypt_uin(
     }))
     .map_err(HelperError::from)?;
     credential.encrypted_uin = encrypt_uin
-        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
         .unwrap_or_default();
     store()
         .store(&credential)
@@ -658,8 +659,8 @@ pub fn album_tracks(
     )
 }
 
-/// An artist's songs. `sort` is `hot` or `latest` ("最新" is computed locally —
-/// the upstream ignores its ordering parameter).
+/// An artist's songs. `sort` is `hot` or `latest` — both go to the upstream's
+/// own global ordering (`order=1` / `order=2`); nothing is sorted locally.
 #[export]
 pub fn artist_songs(
     singer_mid: String,

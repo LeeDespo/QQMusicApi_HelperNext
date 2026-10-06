@@ -483,10 +483,9 @@ pub fn album_tracks(
 
 // MARK: - An artist's works
 
-/// An artist's songs. `sort` is `hot` (upstream order) or `latest`, which is
-/// computed here: the upstream ignores its ordering parameter, so the only way
-/// "最新" can mean anything is to sort the page by each track's album release
-/// date.
+/// An artist's songs. `sort` is `hot` (`order=1`, upstream order) or `latest`
+/// (`order=2`): both go to the upstream, whose ordering is global — nothing is
+/// sorted locally.
 pub fn artist_songs(
     upstream: &Upstream,
     credential: &Credential,
@@ -579,11 +578,15 @@ pub fn artist_albums(
     artist_albums_page(
         upstream, credential, platform, singer_mid, sort, offset, limit,
     )
-    .map(|(albums, _)| albums)
+    .map(|(albums, _, _)| albums)
 }
 
 /// One artist-album page in upstream hot/latest order. Song counts are filled
 /// by one batched request per 30 albums, matching the Android page's usage.
+///
+/// Like the song page, the third element is the next offset over *raw* upstream
+/// rows: rows without a numeric album id are dropped from `albums` but still
+/// consumed a position, so paging must advance by the row count.
 pub fn artist_albums_page(
     upstream: &Upstream,
     credential: &Credential,
@@ -592,7 +595,7 @@ pub fn artist_albums_page(
     sort: &str,
     offset: i64,
     limit: i64,
-) -> Result<(Vec<Value>, Option<i64>), UpstreamError> {
+) -> Result<(Vec<Value>, Option<i64>, Option<i64>), UpstreamError> {
     let order = artist_order(sort)?;
     let data = upstream.call_with(
         credential,
@@ -647,7 +650,8 @@ pub fn artist_albums_page(
         }
     }
     let total = first_int(&data, &["total", "totalNum"]);
-    Ok((albums, total))
+    let next_offset = crate::methods::next_track_offset(offset.max(0), items.len());
+    Ok((albums, total, Some(next_offset)))
 }
 
 fn artist_order(sort: &str) -> Result<i64, UpstreamError> {
@@ -1237,10 +1241,7 @@ pub fn encrypted_lyrics(
         .as_deref()
         .map(crate::qrc::parse)
         .filter(|lines| !lines.is_empty());
-    let word = qrc_lines
-        .as_deref()
-        .map(crate::qrc::to_word_lrc)
-        .or_else(|| qrc_text.clone());
+    let word = word_from_decoded(qrc_lines.as_deref(), qrc_text.as_deref());
 
     Ok(EncryptedLyrics {
         word,
@@ -1286,6 +1287,47 @@ fn decode_lyric_text(raw: &str) -> Option<String> {
 fn decode_qrc_or_text(encoded: &str) -> Option<String> {
     let decrypted = crate::qrc::decrypt_hex(encoded).ok()?;
     Some(crate::qrc::extract_payload(&decrypted).unwrap_or(decrypted))
+}
+
+/// `word` follows the old host contract: LRC content or null.
+///
+/// Parsed QRC lines win, formatted as word-level LRC. Otherwise the decoded
+/// text stands in only when it is itself whole-line LRC — when the QRC parse
+/// yields no lines, a decrypted XML document or bare non-LRC text must come
+/// back as `None`, not leak through as `word`.
+fn word_from_decoded(
+    qrc_lines: Option<&[crate::qrc::QrcLine]>,
+    qrc_text: Option<&str>,
+) -> Option<String> {
+    qrc_lines.map(crate::qrc::to_word_lrc).or_else(|| {
+        qrc_text
+            .filter(|text| is_whole_line_lrc(text))
+            .map(str::to_string)
+    })
+}
+
+/// Whether the text is whole-line LRC: at least one line opens with an
+/// `[mm:ss(.xx)]` timestamp. QRC headers (`[start,duration]`) and metadata tags
+/// (`[ti:…]`) do not count, so neither a decrypted XML shell nor plain prose
+/// passes as LRC.
+fn is_whole_line_lrc(text: &str) -> bool {
+    text.lines().any(|line| {
+        let Some(body) = line.trim_start().strip_prefix('[') else {
+            return false;
+        };
+        let Some(end) = body.find(']') else {
+            return false;
+        };
+        let Some((minutes, seconds)) = body[..end].split_once(':') else {
+            return false;
+        };
+        !minutes.is_empty()
+            && minutes.chars().all(|ch| ch.is_ascii_digit())
+            && !seconds.is_empty()
+            && seconds
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == ':')
+    })
 }
 
 pub fn lyric(
@@ -1563,6 +1605,44 @@ mod tests {
         let base64_hex = STANDARD.encode(hex);
         let wrapped = decode_lyric_text(&base64_hex).expect("base64-wrapped QRC hex decodes");
         assert_eq!(wrapped, qrc);
+    }
+
+    #[test]
+    fn word_falls_back_only_to_valid_lrc() {
+        // Parsed QRC lines win, formatted as word-level LRC.
+        let lines = crate::qrc::parse("[100,200]你(0,50)好(50,100)");
+        assert!(!lines.is_empty());
+        let word = word_from_decoded(Some(&lines), Some("ignored"));
+        assert_eq!(
+            word.as_deref(),
+            Some(crate::qrc::to_word_lrc(&lines).as_str())
+        );
+
+        // No parsed lines + genuine whole-line LRC: the text stands in.
+        assert_eq!(
+            word_from_decoded(None, Some("[00:01.00]plain")).as_deref(),
+            Some("[00:01.00]plain")
+        );
+
+        // No parsed lines + a decrypted XML document: null, never the document.
+        let xml = "<?xml version=\"1.0\"?>\n<QrcInfos>\n\
+                   <QrcHeadInfo Title=\"T\" LyricContent=\"[100,200]你(0,50)好(50,100)\"/>\n\
+                   </QrcInfos>";
+        assert_eq!(word_from_decoded(None, Some(xml)), None);
+
+        // No parsed lines + bare non-LRC text: null too.
+        assert_eq!(word_from_decoded(None, Some("just some words")), None);
+        assert_eq!(word_from_decoded(None, None), None);
+    }
+
+    #[test]
+    fn whole_line_lrc_check_rejects_qrc_headers_and_metadata() {
+        assert!(is_whole_line_lrc("[00:01.00]a\n[00:05.00]b"));
+        assert!(is_whole_line_lrc("  [0:05]no fraction"));
+        assert!(is_whole_line_lrc("[00:01.00][00:05.00]two tags"));
+        assert!(!is_whole_line_lrc("[100,200]你(0,50)"));
+        assert!(!is_whole_line_lrc("[ti:标题]\n[offset:0]"));
+        assert!(!is_whole_line_lrc(""));
     }
 
     #[test]

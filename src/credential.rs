@@ -244,6 +244,42 @@ mod tests {
     }
 
     #[test]
+    fn encrypt_uin_reads_the_camel_case_fallback_from_value() {
+        // The login response's own spelling (`encryptUin`).
+        let from_response = Credential::from_value(&json!({
+            "musicid": "42", "musickey": "K", "encryptUin": "EUIN-CAMEL"
+        }));
+        assert_eq!(from_response.encrypted_uin, "EUIN-CAMEL");
+
+        // The credential file's spelling wins when both are present.
+        let from_file = Credential::from_value(&json!({
+            "musicid": "42", "musickey": "K",
+            "encrypt_uin": "EUIN-SNAKE", "encryptUin": "EUIN-CAMEL"
+        }));
+        assert_eq!(from_file.encrypted_uin, "EUIN-SNAKE");
+
+        // Neither present: empty, not an error.
+        let absent = Credential::from_value(&json!({"musicid": "42", "musickey": "K"}));
+        assert_eq!(absent.encrypted_uin, "");
+    }
+
+    #[test]
+    fn cookie_import_reads_the_camel_case_encrypt_uin_fallback() {
+        let camel = credential_from_cookies(&json!({
+            "uin": "42", "qm_keyst": "KEY", "encryptUin": "EUIN-CAMEL"
+        }))
+        .expect("a complete cookie set is a login");
+        assert_eq!(camel.encrypted_uin, "EUIN-CAMEL");
+
+        let snake = credential_from_cookies(&json!({
+            "uin": "42", "qm_keyst": "KEY",
+            "encrypt_uin": "EUIN-SNAKE", "encryptUin": "EUIN-CAMEL"
+        }))
+        .expect("a complete cookie set is a login");
+        assert_eq!(snake.encrypted_uin, "EUIN-SNAKE");
+    }
+
+    #[test]
     fn str_musicid_wins_over_the_numeric_one() {
         let store_dir = std::env::temp_dir().join("qqmusic-helper-next-credential-test");
         let _ = std::fs::remove_dir_all(&store_dir);

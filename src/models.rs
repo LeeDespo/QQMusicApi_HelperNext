@@ -126,6 +126,9 @@ pub struct TrackPage {
 pub struct AlbumPage {
     pub albums: Vec<Album>,
     pub total: Option<i64>,
+    /// Next upstream row offset, including rows omitted from `albums` — the
+    /// same semantics as [`TrackPage::next_offset`].
+    pub next_offset: Option<i64>,
 }
 
 /// One credited singer of a track.
@@ -471,7 +474,8 @@ pub struct LikeReceipt {
 #[serde(rename_all = "camelCase")]
 pub struct StreamResolution {
     pub song_mid: String,
-    /// `flac` / `320` / `128` / `aac` when `playable`.
+    /// One of the six ladder labels — `flac` / `ogg320` / `320` / `ogg192` /
+    /// `128` / `aac` — when `playable`.
     pub quality: Option<String>,
     pub filename: Option<String>,
     pub url: Option<String>,

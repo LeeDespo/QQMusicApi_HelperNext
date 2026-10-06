@@ -4,7 +4,7 @@
 所以 macOS/iOS 应用与 Android 应用共用一套实现。
 
 组件版本从 **0.1.0** 升为 **0.2.0**：BoltFFI 模型新增了曲目文件大小/曲风、专辑曲数、结构化 QRC（`QrcLine`/`QrcWord`）、
-分页偏移（`TrackPage.nextOffset`、新 `AlbumPage`）与喜欢写回执（`LikeReceipt`），并增加了初始化和分页等导出。
+分页偏移（`TrackPage.nextOffset`、新 `AlbumPage` 的 `nextOffset`）与喜欢写回执（`LikeReceipt`），并增加了初始化和分页等导出。
 JSON `PROTOCOL_VERSION` 仍为 **2**，旧的 stdio 请求与返回字段保持兼容；
 FFI 的 Rust 数据模型按字段顺序编码，因此 Kotlin/Swift bindings 与 native library 必须由同一版本一起生成和打包，
 不能把旧 bindings 与 0.2.0 native 混用。

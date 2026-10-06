@@ -41,7 +41,7 @@
 | 退出登录 | `logout` | — | — | 删除凭据文件 |
 | 扫码登录 | `start_login` / `poll_login` | `ssl.ptlogin2.qq.com` 五步握手 | `loginType` / `identifier` | `qrcode.imageBase64` / `event` |
 | 我喜欢 | `fetch_liked_songs` | `music.srfDissInfo.DissInfo` / `CgiGetDiss` | `dirid=201, song_begin, song_num` | 曲目在 `songlist`，总数在 `dirinfo.songnum` |
-| 歌单 / 排行榜曲目 | `fetch_playlist_tracks` / `fetch_playlist_tracks_page` | 同上 | `disstid=<id>` + `page` 或 `offset`，`song_num`；我喜欢传 `listId=0, dirId=201`（只给 `dirId=201` 也算） | `tracks` + `total` + `nextOffset`（两个变体都回）；`nextOffset` 按原始行数推进，不可解码行也占位 |
+| 歌单 / 排行榜曲目 | `fetch_playlist_tracks` / `fetch_playlist_tracks_page` | 同上 | `disstid=<id>` + `page` 或 `offset`，`song_num`；我喜欢传 `listId=0, dirId=201`（只给 `dirId=201` 也算）；`comm` 档案跟随 initialize 的 `platform` / `params.platform`，未配置时仍为 web | `tracks` + `total` + `nextOffset`（两个变体都回）；`nextOffset` 按原始行数推进，不可解码行也占位 |
 | 排行榜分组 | `fetch_toplist_categories` | `music.musicToplist.Toplist` / `GetAll` | `{}` | 组内键名是 `toplist`（小写 l） |
 | 排行榜曲目 | `fetch_toplist_tracks` | `music.musicToplist.Toplist` / `GetDetail` | `topId, offset, num` | 曲目在 `songInfoList`，总数 `totalNum` |
 | 我的歌单 | `fetch_user_playlists` | 老 fcgi | `reqtype=3` | 无 `dissid` 的保留目录要跳过 |
@@ -53,7 +53,7 @@
 | 歌手简介 | `fetch_artist_biography` | `music.musichallSinger.SingerInfoInter` / `GetSingerDetail` | `singer_mids` 与数字 `1` 开关；主页资料另读 Header | 回答在 `artistDetail`，优先 `ex_info.desc` |
 | 专辑曲目 | `fetch_album_tracks` | `music.musichallAlbum.AlbumSongList` / `GetAlbumSongList` | `albumMid` 或 `albumId`, `begin`, `num` | 列表键是 `songList`（大写 L），总数在 `totalNum`；`nextOffset` 按原始行数递增，即使某行被解码器过滤 |
 | 歌手歌曲 | `fetch_artist_songs` / `fetch_artist_songs_page` | `musichall.song_list_server` / `GetSingerSongList` | `singerMid`；`sort` 用 `hot`/`latest`（上游 `order=1/2`，未知值报错）；老方法给 `page, limit`，page 变体给 `offset, limit` | 全局排序由上游做，page 变体保留 `totalNum`；上游某些档案最少回 30 行，组件把原始窗口压到请求 `limit` 再解码并回 `nextOffset`（不可解码行也占位）；`releaseDate` 取自同条歌曲的专辑 |
-| 歌手专辑 | `fetch_artist_albums` / `fetch_artist_albums_page` | `music.musichallAlbum.AlbumListServer` / `GetAlbumList` | 同歌手歌曲（`sort`/`offset`/`limit`） | page 变体回 `albums` + `total`；`albumID`（大写 ID）是上游的拼写；列表缺失的专辑曲数按每批最多 30 张批量补齐 |
+| 歌手专辑 | `fetch_artist_albums` / `fetch_artist_albums_page` | `music.musichallAlbum.AlbumListServer` / `GetAlbumList` | 同歌手歌曲（`sort`/`offset`/`limit`） | page 变体回 `albums` + `total` + `nextOffset`；`nextOffset` 与曲目页同义，按原始行数推进，缺数字专辑 id 的行也占位；`albumID`（大写 ID）是上游的拼写；列表缺失的专辑曲数按每批最多 30 张批量补齐 |
 | 电台分组 | `fetch_radio_stations` | `pf.radiosvr` / `GetRadiolist` | `uin` | — |
 | 电台曲目 | `fetch_radio_tracks` | `pf.radiosvr` / `GetRadiosonglist` | `id`, `num`, `firstPlay` | 电台是无穷列表 |
 | 电台轮播批次 | `fetch_radio_track_batch` | `mb_track_radio_svr` / `get_radio_track` | `stationId`, `firstPlay` | 返回 `{tracks,total:null}`；宿主用 `firstPlay=false` 拉下一批并自行去重 |

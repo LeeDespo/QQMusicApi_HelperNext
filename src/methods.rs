@@ -189,7 +189,9 @@ fn catalog_dispatch(
             int("offset").unwrap_or(0),
             round(int("limit"), 30, 1, 100),
         )
-        .map(|(albums, total)| json!({ "albums": albums, "total": total })),
+        .map(|(albums, total, next_offset)| {
+            json!({ "albums": albums, "total": total, "nextOffset": next_offset })
+        }),
         "fetch_artist_songs" => crate::catalog::artist_songs(
             upstream,
             credential,
@@ -399,12 +401,17 @@ fn catalog_dispatch(
                 }
             })
         }),
-        "poll_login" => crate::login::poll_login(
-            upstream,
-            &crate::credential::CredentialStore::for_directory(&crate::data_directory()),
-            &text("identifier"),
-        )
-        .map(|result| json!({ "login": result })),
+        "poll_login" => {
+            // Same discipline as `api::store`: pin the configuration (and with
+            // it the credential directory) before any store touches the disk.
+            crate::freeze_configuration();
+            crate::login::poll_login(
+                upstream,
+                &crate::credential::CredentialStore::for_directory(&crate::data_directory()),
+                &text("identifier"),
+            )
+            .map(|result| json!({ "login": result }))
+        }
         "set_liked" => crate::catalog::set_liked(
             upstream,
             credential,
@@ -420,7 +427,9 @@ fn catalog_dispatch(
         "set_liked_by_id" => crate::catalog::set_liked_by_id(
             upstream,
             credential,
-            Platform::Android,
+            // The android-default override above already resolved `platform`
+            // for the writes; honor it (and an explicit `params.platform`).
+            platform,
             int("songId").unwrap_or(0),
             params.get("liked").and_then(Value::as_bool).unwrap_or(true),
         ),
