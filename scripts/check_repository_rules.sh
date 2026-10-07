@@ -25,7 +25,7 @@ else
   fail 'release doc layout changed: expected docs/RELEASING.md only'
 fi
 
-boundary_pattern='NeuMusic|Music_app|dist/reference/|\.zcode/|app/helpernext/|source\.patch'
+boundary_pattern='NeuMusic|Music_app|dist/reference/|\.zcode/|app/helpernext/|source\.patch|移植层|尚未移植|qqmusic-helper-next-cli|工作单要求'
 hits="$(grep -nE "$boundary_pattern" "${active_docs[@]}" || true)"
 [ -z "$hits" ] && pass 'active docs contain no consumer/local-reference dependencies' || { fail 'active docs contain consumer/local-reference dependencies:'; printf '%s\n' "$hits"; }
 
