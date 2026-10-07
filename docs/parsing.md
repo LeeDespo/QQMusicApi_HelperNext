@@ -13,7 +13,7 @@
 用错档案不会报错：搜索会回 `meta.sum = 0`，取流会回 `104003`。所以"某个接口今天突然没数据了"
 先看档案，再看参数。
 
-移植层按端点的实测结论选档案，两处容易记反：
+扩展端点层按端点的实测结论选档案，两处容易记反：
 
 - **必须 android，且是实测确定的**：歌手主页 Tab（`GetHomepageTabDetail`，web 档案回 `code 10000` + 空壳）、
   歌手名称图像（`GetHomepageHeader` 且 comm 要盖 `cv/v = 20080000`）、
@@ -46,7 +46,7 @@
 
 ## 5. 大小写与命名
 
-- 关注歌手的列表键是 **`List`**（大写 L）。QQMusicApi 的模型里叫 `users`，照模型去找会以为"没有这个能力"。
+- 关注歌手的列表键是 **`List`**（大写 L）。不要按语义猜成 `users`；否则会把正常响应误判为空。
 - 专辑列表里是 **`albumID`**（大写 ID）。按 `albumId` 取会每一项都拿不到 id，
   整表被 `filter_map` 静默丢掉、返回 0 张。
 - 专辑曲目的列表键是 **`songList`**（大写 L），不是 `songlist`。
@@ -161,7 +161,7 @@ QRC 密钥是 QQ 私有的「类 DES」，不是标准 DES；解密后再取 XML
   否则会用空列表覆盖宿主缓存里的真数据。
 - **歌曲简介**里的空＝这首歌本来就没有简介＝**就是答案**，照常返回。
 
-同一条读取路径上挂着两种相反的规则，判据是"空是不是一种合法的正常状态"。移植层按同一条判据：
+同一条读取路径上挂着两种相反的规则，判据是"空是不是一种合法的正常状态"。扩展端点层按同一条判据：
 
 - **键不在＝故障**：收藏歌单/专辑/MV（`v_list`/`mvlist`）、关系列表（`List`）、好友（`Friends`）、
   创建的歌单（`v_playlist`）、音乐基因的 `UserInfoCard`、歌手资料的空壳（连 `Name` 都没有）。
@@ -183,10 +183,9 @@ QRC 密钥是 QQ 私有的「类 DES」，不是标准 DES；解密后再取 XML
 
 ## 15. 签名路（`musics.fcg` 的 `zzc`）与 `musics.fcg` 不是同一条
 
-参考里标 `sign=True` 的端点走 `POST musics.fcg?sign=…`：信封、module/method、参数与
+需要 `zzc` 签名的端点走 `POST musics.fcg?sign=…`：信封、module/method、参数与
 `musicu.fcg` 完全相同，只是 URL 上多一个 `zzc`。**服务端按收到的字节校验**，签名对不上回
-`2000`——所以发送与签名必须用同一份字节，不能序列化两次。算法的两段固定下标与异或表照抄
-参考（`src/port/signed.rs`），自己发明等价物一定失败。
+`2000`——所以发送与签名必须用同一份字节，不能序列化两次。算法的固定下标与异或表属于已验证协议行为（实现见 `src/port/signed.rs`），不得随意改写。
 
 签名路上有两种 comm：
 
@@ -194,32 +193,31 @@ QRC 密钥是 QQ 私有的「类 DES」，不是标准 DES；解密后再取 XML
 - **匿名 h5 comm**（`override_comm=True`，乐谱两件、虫虫钢琴档）——`uin` 空、`g_tk` 是
   **字面量 5381**，不是账号的 `g_tk`。`g_tk` 用错不会报错，只会得到空数据。
 
-工作单要求乐谱两个端点都签名，但参考里只有虫虫钢琴那一档显式标了 `sign=True`
-（`song.py:236`），默认档与 `HasSheetMusic` 没标；签名只是 URL 多带 `zzc`，信封与参数不变。
+乐谱相关方法是否走签名路以当前生产实现与 [endpoints.md](endpoints.md) 为准；签名路只改变 URL 的 `zzc`，信封与参数契约保持一致。
 
 **`80092` / `10007` 这类"业务码不是错误"**：`call_with` 把它们收成错误，各领域自己还原。
 `10007`（没有曲谱）还原成空答案；`80092`（歌已在/不在歌单）按成功收下——后者是**从错误
 文案的括号里解析码**（`上游返回错误（80092）：…`），依赖 `upstream.rs` 的错误格式。
 
-## 16. 移植层里几个键名的陷阱
+## 16. 扩展端点层里几个键名的陷阱
 
 - **评论回值的列表与分页字段在 `CommentList` 里，`Msg`/`SubCode`/`TotalCmNum` 在它的兄弟上**；
   计数的 `count` 系列在 `response` 里，`cmTabType` 也在兄弟上。按一套形状找齐会两边都丢。
-- **`fetch_hot_comments` 的 `PageNum` 是 `page - 1`**（第一页传 0），照参考；这不是笔误。
+- **`fetch_hot_comments` 的 `PageNum` 是 `page - 1`**（第一页传 0）；这是已验证请求规则，不是笔误。
 - **`GetOtherVersionSongs` 只认 `songmid`/`songid`，不认 `mids`/`ids`**（真机核实）。
-  参考 module 层的 `value: int|str` 就是二选一，web 适配器里的合并写法没搬过来。
+  参数 `value` 只在数字 ID 与 MID 两种形状之间二选一。
 - **MV 地址的 `newFileType`/`fileSize` 是驼峰**，而 MV 详情的上传者字段在上游实际是
   snake_case（`uploader_hasfollow` 等）。候选键两类都列了，但同一字段拼写若随账号变化，
   以哪套为准需要人确认（见[待决清单](pending.md)）。
 - **模型里 `has_ldy`→`hasLdy`、`has_qrcx`→`hasQrcx`、`score_mid`→`scoreMid`、`pic_urls`→`picUrls`**
   是照本层规则转的 camelCase，不是上游那套 `hasLDY`/`scoreMID`/`picURLs`；宿主按上游缩写读键名会读空。
-- **`fetch_artist_tab` 的 `TabID` 在请求里是字符串**（`wiki`/`song_sing`/…，参考 TabType）；
-  冒烟脚本传的是数字 1，移植层按参考声明次序把它映射成字符串，两种都收。
+- **`fetch_artist_tab` 的 `TabID` 在请求里是字符串**（`wiki`/`song_sing`/…）；
+  为兼容既有调用，数字 1 也会映射到对应的 Tab 字符串。
 - **`resolve_song_urls` 顶层 `fileType` 属加密类时改打 `GetEVkey`**；项里各自的加密类型
-  **不参与**这个判断（参考就是如此）。该档实测回 `ekey: null`，宿主需自行决定是否降级到普通档。
+  **不参与**这个判断；这是当前已验证协议行为。该档实测回 `ekey: null`，宿主需自行决定是否降级到普通档。
 
 
-## 17. 实测响应编码与类型化契约（2026-10-04）
+## 17. 响应编码与类型化契约
 
 `PlaylistBaseWrite`（建/删歌单）与 `PlaylistDetailWrite`（加/删歌）可能返回 GBK 字节，却标注 UTF-8。
 组件仅在这两个模块且响应不是有效 UTF-8 时尝试 GBK；其他 JSON 路径继续严格校验。异常 UTF-16 单独代理码以 U+FFFD 表示，合法代理码对及字面量反斜线保持原样。

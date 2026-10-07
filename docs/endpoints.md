@@ -19,7 +19,7 @@
 **`comm` 的平台档案按接口分类选择**，选错不报错、只回空数据：
 
 - **web 档案** —— 账号列表（我喜欢 / 我的歌单 / 收藏专辑 / 关注歌手）、曲库详情、榜单、电台、新歌；
-  移植层里的评论、MV、账号资产与关系、集合写入、推荐扩展也是这一档（这些端点参考没标档案，跟随调用方给的档案，组件默认 Web）。
+  扩展端点层里的评论、MV、账号资产与关系、集合写入、推荐扩展也默认这一档；调用方显式指定档案时按各方法契约处理。
   用库默认档案请求账号列表会被拒（`10004`）。
 - **android 档案** —— 搜索、取流、收藏写（`set_liked` / `set_liked_by_id`）、推荐流、歌手资料与主页 Tab、封面匹配、
   批量取流；两个搜索 CGI 端点（综合 / 类型搜索）按实测也走这里。
@@ -27,7 +27,7 @@
 
 ## 二、方法清单
 
-除非另有说明，每条都在真实账号上跑通过。移植层里只做过单测、没上真机的条目会在下文另注；
+除非另有说明，每条都在真实账号上跑通过。扩展端点层里只做过单测、没上真机的条目会在下文另注；
 登录/扫码族始终未真机验证（见第五节的当前限制），写接口的真实账号验证范围见「已验证与剩余限制」。
 
 | 能力 | 方法 | 上游 module / method | 参数要点 | 关键回值 |
@@ -66,19 +66,19 @@
 | 搜索（四类） | `search_songs` / `search_artists` / `search_albums` / `search_playlists` | `music.search.SearchCgiService` / `DoSearchForQQMusicMobile` | `keyword, num_per_page, page_num, search_type` 0/1/2/3 | 结果在 `body.item_*`，总数 `meta.sum`；标题带 `<em>`，组件剥掉 |
 | 封面匹配（三件） | `search_track_artwork` / `search_artist_artwork` / `search_album_artwork` | 内部走搜索 | 名称字段 + `limit` | 候选 + 排名置信度 |
 
-移植层（`src/port/`）的接口按领域另列一张表。参考库里没有标档案的端点按本层约定跟随调用方给的档案（组件默认 Web），
+扩展端点层（`src/port/`）的接口按领域另列一张表。未单独规定平台档案的端点按本层约定跟随调用方给的档案（组件默认 Web），
 表里另注的除外。
 
 | 能力 | 方法 | 上游 module / method | 参数要点 | 关键回值 |
 |---|---|---|---|---|
 | 评论 · 数量 | `fetch_comment_count` | `music.globalComment.CommentCountSrv` / `GetCmCount` | `bizId`（数字），`bizType` 1=歌曲 2=专辑 3=歌单 4=MV 15=长音频（缺省 1），`bizSubType`（歌曲缺省 2） | 总数在 `count`，角标在 `iconList`，`cmTabType` 在 `response` 的兄弟键上 |
-| 评论 · 热评 | `fetch_hot_comments` | `music.globalComment.CommentRead` / `GetHotCommentList` | `bizId, page, limit, lastCommentSeqNo, bizType` | `comments` + `hasMore`；`PageNum` 是 `page-1`（照参考） |
+| 评论 · 热评 | `fetch_hot_comments` | `music.globalComment.CommentRead` / `GetHotCommentList` | `bizId, page, limit, lastCommentSeqNo, bizType` | `comments` + `hasMore`；`PageNum` 是 `page-1`（已验证协议规则） |
 | 评论 · 新评 | `fetch_new_comments` | 同上 / `GetNewCommentList` | 同上 | 同上 |
 | 评论 · 推荐评 | `fetch_recommend_comments` | 同上 / `GetRecCommentList` | 同上 | 同上 |
 | 评论 · 时刻评论 | `fetch_moment_comments` | `music.globalComment.SongTsComment` / `GetSongTsCmList` | `bizId, limit, lastCommentSeqNo`（游标回填回值 `nextPos`） | `comments` + `nextPos` |
 | 评论 · 发表 | `add_comment` | `music.globalComment.CommentWriteServer` / `AddComment` | `bizId, content, replyCmtId, bizType`；需登录 | 新评论 `id`、`subcode`，必要时给验证码 URL |
 | 评论 · 删除 | `delete_comment` | 同上 / `DelComment` | `cmId`；需登录 | `SubCode==0` 即成功，**评论不存在也算成功** |
-| MV · 详情 | `fetch_mv_detail` | `video.VideoDataServer` / `get_video_info_batch` | `vids`（协议键 `vidlist`）+ 22 项 `required` 长数组（照参考逐字抄，含重复项） | 以 vid 为键的映射；空映射是答案 |
+| MV · 详情 | `fetch_mv_detail` | `video.VideoDataServer` / `get_video_info_batch` | `vids`（协议键 `vidlist`）+ 22 项 `required` 长数组（按已验证请求形状固定，含重复项） | 以 vid 为键的映射；空映射是答案 |
 | MV · 播放地址 | `resolve_mv_urls` | `music.stream.MvUrlProxy` / `GetMvUrls` | `vids`；`guid` 每次请求现生成 | 以 vid 为键，每条含 `mp4`/`hls` 两组 |
 | MV · 分类列表 | `fetch_mv_list` | `MvService.MvInfoProServer` / `GetAllocMvInfo` | `area`(15=全部), `version`(7=全部), `order`(0=最新), `num`, `page`；`start = num*(page-1)` | `total` + `items`（上游键是 `list`） |
 | 歌手 · 列表 | `fetch_singer_list` | `music.musichallSinger.SingerList` / `GetSingerList` | `area`/`sex`/`genre` 照 AreaType/SexType/GenreType，缺省都是 -100 | `singerlist` / `hotlist` / `tags`；空列表是答案 |

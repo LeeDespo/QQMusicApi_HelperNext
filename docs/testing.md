@@ -25,7 +25,7 @@
     XML 结构、逐字解析、JSON 序列化、word-LRC 全链路；
   - **port 层确定性测试**（`src/port/mod.rs`）：每个方法必须有同名 `#[export]` 包装且在
     `METHODS` 与 `dispatch` 两处出现；方法名跨领域唯一。漏登记在这里爆；
-  - **`api_surface_matches`**（`src/api.rs:555`）：协议方法表与类型化包装一一对应（含别名表）；
+  - **`api_surface_matches`**（`src/api.rs`）：协议方法表与类型化包装一一对应（含别名表）；
   - **stdio 协议测试**（`src/bin/stdio.rs`）：`id` 关联、资源 `id` → `resultId` 的搬运；
   - 配置冻结、信封解析、guard 窗口等各自模块内测试。
 - `#[ignore]` 的联网用例不会在默认 `cargo test` 里执行；且 `#[ignore]` 不止 `tests/live_typed.rs` 一个：
@@ -104,9 +104,7 @@ python3 scripts/port_write_smoke.py --execute-writes --report <结果.json>
 - 凭据与密钥（cookies、`qm_keyst`、`musickey`、`encrypt_uin` 等）不进 git、不进日志、
   不进文档、不进测试报告；
 - 组件侧已保证：凭据读写只在 `src/credential.rs`，stdio 回包与 stderr 日志不含凭据内容；
-- 测试侧自查：任何要留档的 JSON/日志，先扫一遍敏感键再入库。既有 7 个冒烟取证 JSON
-  （`docs/history/evidence/2026-10-04/*-smoke-2026-10-04.json`）复核过 `qm_keyst/qimei/cookie/token`
-  全部 0 命中——它们是聚合结果（passed/failed/writes/restorations），因此可以作为历史取证留库。
+- 测试侧自查：任何要留档的 JSON/日志，先扫描敏感键并确认只包含必要的聚合结果；满足条件的历史报告才可进入 `docs/history/evidence/`。
 
 ## 7. 失败怎么办
 

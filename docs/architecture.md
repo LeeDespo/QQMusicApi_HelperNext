@@ -27,9 +27,9 @@ src/bin/stdio.rs                    #[export] 类型化 API
                     │
       ┌─────────────┼──────────────────────┐
       ▼             ▼                      ▼
-src/catalog.rs   src/port/*（移植层，      内建方法：
+src/catalog.rs   src/port/*（扩展端点层，    内建方法：
 （既有端点：      一领域一文件，            限流/熔断配置、aria2_*、
- 目录/榜单/       参考实现新接口）           登录状态、helper info
+ 目录/榜单/       按明确需求扩展）           登录状态、helper info
  歌词/取流/搜索）
       └─────────────┼──────────────────────┘
                     ▼
@@ -52,12 +52,12 @@ src/catalog.rs   src/port/*（移植层，      内建方法：
 `api_surface_matches` 测试（定义在 `src/api.rs`）再把方法表与类型化包装钉死一次。
 
 **协议层是「方法名 → 端点」的表，不是业务逻辑。** `methods::dispatch`（`src/methods.rs`）
-只做路由：先查既有表（`catalog_dispatch`，优先级最高），再试移植层（`port::dispatch`，因此移植的
-新方法永远不会遮蔽既有方法），最后是内建方法。`get_helper_info` 广告的方法列表是两者并集，
+只做路由：先查既有表（`catalog_dispatch`，优先级最高），再试扩展端点层（`port::dispatch`，因此扩展
+方法不会遮蔽既有方法），最后是内建方法。`get_helper_info` 广告的方法列表是两者并集，
 宿主枚举到的就是全部能力。
 
-**移植层独立成 `src/port/`，一领域一文件。** 参考实现（QQMusicApi）里尚未移植的接口持续落进
-port 层，而既有代码是已上线契约、不能被顺手改动——把两者隔开，移植就永远不破坏存量。
+**扩展端点层独立成 `src/port/`，一领域一文件。** 只有明确进入本组件范围的新能力才落到
+port 层；外部参考项目存在某个接口，并不自动构成本仓库的待办。既有代码是已上线契约，扩展时不得顺手改写。
 一个领域文件自带 `METHODS`、`dispatch`、`#[data]` 模型、`#[export]` 包装和测试；
 `src/port/mod.rs` 集中登记并自带两条确定性测试（每个方法必须有同名包装且在 `METHODS`
 与 `dispatch` 两处出现；方法名跨领域不得重复）。签名类端点共用的 `zzc` 签名在
@@ -72,15 +72,15 @@ port 层，而既有代码是已上线契约、不能被顺手改动——把两
 | `src/models.rs` | `#[data]` 数据模型，camelCase，一份定义同时服务 JSON 与 FFI | 字段不重排、不改名（FFI 按字段顺序编码） |
 | `src/methods.rs` | 方法表 `METHODS`、`dispatch` 路由、内建方法、版本常量（数值以代码为准） | 不把端点业务写进路由层；协议版本不轻易变动 |
 | `src/catalog.rs` | 既有目录/榜单/歌词/取流/搜索端点的实现与解析 | 既有形状是契约，改前先读 `docs/parsing.md` 的结论 |
-| `src/port/*` | 参考实现新端点，一领域一文件，自带模型/包装/测试 | 不碰 `src/api.rs` 等既有文件；不遮蔽既有方法 |
-| `src/port/signed.rs` | `musics.fcg` 的 `zzc` 签名（SHA-1 移植，照抄参考实现，签名对不上直接回 `2000`） | 不「发明等价算法」；签名必须作用于实际发送的字节 |
+| `src/port/*` | 按明确组件需求扩展端点，一领域一文件，自带模型/包装/测试 | 不碰 `src/api.rs` 等既有文件；不遮蔽既有方法 |
+| `src/port/signed.rs` | `musics.fcg` 的 `zzc` SHA-1 签名实现（签名不匹配会回 `2000`） | 不随意改动已验证算法；签名必须作用于实际发送的字节 |
 | `src/upstream.rs` | 唯一的 QQ 上游 HTTP；`Platform`（web/android）档案的 `comm` 叠加；挂载限流器、熔断器、设备身份、`encrypt_uin` 缓存 | 其他任何模块不得对 QQ 上游发 HTTP |
 | `src/guard.rs` | 按内容类别分桶的限流（Read/Interactive/Playback/Account/Write，超限等待不丢弃）与熔断（阈值开路、半开探测） | 不在调用方各自实现节流 |
 | `src/credential.rs` | 凭据读写与兼容格式、`g_tk = hash33(qm_keyst)`、cookie 头组装 | 凭据不进日志、不进回包、不进文档 |
 | `src/device.rs` | QIMEI 设备身份（RSA+AES 协议复刻），生成一次存盘，仅 android 档案使用 | 不重复申请设备身份；HTTP 复用传入的共享 agent |
 | `src/aria2.rs` | 本地下载引擎托管：按需启动、JSON-RPC over loopback、宿主消失时随进程退出 | 不把 aria2 的 RPC 混入上游 agent；不常驻后台 |
 | `src/login.rs` | QQ 扫码登录五步（`ptqrshow` → 轮询 → `check_sig` → authorize → QQLogin），流程无状态 | 不在组件里保存登录会话状态 |
-| `src/qrc.rs` | QRC 逐字歌词：私有 DES 解密 → XML 取载荷 → 解析 → word-LRC；由已知答案向量钉住 | 解密算法照规范移植，不自创 |
+| `src/qrc.rs` | QRC 逐字歌词：私有 DES 解密 → XML 取载荷 → 解析 → word-LRC；由已知答案向量钉住 | 解密算法按已验证规范实现，不自创 |
 | `src/bin/stdio.rs` | 行协议适配器：`id` 关联、资源 `id` → `resultId`、诊断走 stderr、父进程看门狗、退出时关停 aria2 | 不实现端点；stdout 只出协议 JSON，凭据不进任何一行 |
 
 ## 4. 横向约束（所有模块共同遵守）

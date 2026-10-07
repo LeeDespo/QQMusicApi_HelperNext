@@ -9,7 +9,7 @@
 | 类型 | 典型改动 | 落点 |
 |---|---|---|
 | A 文档/规则 | 契约记录、待决事项、发布规则 | `docs/`，发布语义同步 [RELEASING.md](RELEASING.md) |
-| B 新增端点（常态） | 参考实现里有、组件还没有的接口 | `src/port/` 新领域文件，按第 4 节检查表 |
+| B 新增端点 | 产品/消费需求明确要求、且当前组件没有等价入口的能力 | `src/port/` 新领域文件，按第 4 节检查表 |
 | C 既有契约变更（罕见） | 改 `src/api.rs`/`models.rs`/`methods.rs`/`catalog.rs` 或 port 既有文件的既有行为 | 先在 [pending.md](pending.md) 记录取舍，评审后再动；同步 FFI 成套更新 |
 | D 平台与打包 | `boltffi.toml`、打包脚本、CI | 遵守 [RELEASING.md](RELEASING.md) 的范围与禁止事项 |
 | E 测试基建 | 冒烟脚本、离线测试 | 遵守 [testing.md](testing.md) 的安全规则 |
@@ -35,7 +35,7 @@ grep -rn "模块名/方法名" src/methods.rs src/port/   # 例：music.SongInfo
 grep -n "方法英文名" src/port/*/METHODS src/methods.rs
 ```
 
-- 参考实现里的别名（如 like/unlike→`set_liked`、推荐流/新歌的复用入口）**复用既有方法**，不另开新名字；
+- 历史别名或上游别名若与现有能力等价（如 like/unlike→`set_liked`），**复用既有方法**，不另开新名字；
 - 同一上游端点只允许一个实现；类型化包装只是薄壳，把请求交给协议层再解析成模型；
 - 现行 module / method / param 的仓库内契约以生产实现与 [endpoints.md](endpoints.md) 为准。新增能力研究可以查阅 QQMusicApi 的公开仓库并固定到明确 commit/tag，但不得把未跟踪的本地参考快照变成活文档依赖或第二真源。
 
@@ -62,20 +62,20 @@ grep -n "方法英文名" src/port/*/METHODS src/methods.rs
 
 - `#[data]` / `#[export]` 是公开契约：**字段只追加、不重排、不改名**。FFI 按字段顺序编码，
   Swift/Kotlin bindings 与 native library 必须由同一版本成套生成与发布，新旧不能混用（详见 [ffi.md](ffi.md)）；
-- `api_surface_matches`（`src/api.rs:555`）强制 `METHODS` 与类型化包装一一对应；
+- `api_surface_matches`（`src/api.rs`）强制 `METHODS` 与类型化包装一一对应；
   包装名与协议名不同时（如 `import_cookies`→`import_credential`）登记在测试的别名表里；
-- `PROTOCOL_VERSION`（现为 2）只在 stdio 协议形状变化时变动，且必须保持旧字段兼容；
+- `PROTOCOL_VERSION` 只在 stdio 协议形状变化时变动；当前数值以生产代码为准，变更必须评估兼容性；
 - 生成器限制：`Vec<(String, String)>` 元组向量会失败/被跳过，用具名 `#[data]` 结构替代（见 [ffi.md](ffi.md)）。
 
 ## 7. 平台档案规则
 
-- 档案只有两个：`Platform::Web`（默认）与 `Platform::Android`（`src/upstream.rs:38-78`）；
+- 档案只有两个：`Platform::Web`（默认）与 `Platform::Android`（定义见 `src/upstream.rs`）；
   档案只改 `comm` 叠加，不改凭据；
-- **用错档案不报错**：搜索回空 `meta.sum`、取流回 `104003`、部分接口直接风控——所以移植前必须查
+- **用错档案不报错**：搜索回空 `meta.sum`、取流回 `104003`、部分接口直接风控——所以实现或修改端点前必须查
   [parsing.md](parsing.md) 第一节的实测结论，不要按「歌手资料走 android」一刀切；
 - 部分方法在 `methods.rs` 的 `catalog_dispatch` 里缺省强制 android（写、搜索、推荐流、取流等），
   调用方显式给 `params.platform` 时永远优先；
-- 新端点拿不准时：先按参考实现的档案发请求实测，把结论写进 [parsing.md](parsing.md)，再落代码。
+- 新端点拿不准时：先根据公开研究资料提出平台档案假设，再用受控真实请求验证；只有验证后的结论写进 [parsing.md](parsing.md)。
 
 ## 8. 错误规则
 
