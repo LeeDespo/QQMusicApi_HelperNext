@@ -1,9 +1,6 @@
 //! 歌手扩展：歌手列表（全量 / 索引分页）、相似歌手、主页 Tab、名称图片、歌手 MV。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/singer.py`
-//! （`get_info` 与 `get_desc` 已由既有 `fetch_artist_detail` 覆盖，不重复移植）。
-//! 回值字段名照 `models/singer.py` 的同名模型（camelCase），枚举值照
-//! `AreaType` / `GenreType` / `SexType` / `TabType` / `IndexType`。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! # 平台档案
 //!

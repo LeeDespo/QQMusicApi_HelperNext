@@ -1,10 +1,6 @@
 //! 搜索扩展：热词、联想补全、快速搜索、综合搜索，以及既有四类之外的搜索类型。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/search.py`
-//! （`get_hotkey` / `complete` / `quick_search` / `general_search` /
-//! `search_by_type` 的全部类型），回值字段名照
-//! `models/search.py` 的同名模型（camelCase）。既有的 `search_songs` 等四个
-//! 方法不动，这里补其余类型与另几条搜索路。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! # 五个端点
 //!

@@ -29,6 +29,11 @@ boundary_pattern='NeuMusic|Music_app|dist/reference/|\.zcode/|app/helpernext/|so
 hits="$(grep -nE "$boundary_pattern" "${active_docs[@]}" || true)"
 [ -z "$hits" ] && pass 'active docs contain no consumer/local-reference dependencies' || { fail 'active docs contain consumer/local-reference dependencies:'; printf '%s\n' "$hits"; }
 
+# Production source comments describe the current component, not migration scaffolding.
+source_residue_pattern='dist/reference/|docs/qqmusic|Python helper|old helper|被替换的 Python|NeuMusic|Music_app'
+hits="$(grep -rnE "$source_residue_pattern" src --include='*.rs' || true)"
+[ -z "$hits" ] && pass 'production source contains no migration/local-reference residue' || { fail 'production source contains migration/local-reference residue:'; printf '%s\n' "$hits"; }
+
 hits="$(grep -nE 'v?[0-9]+\.[0-9]+\.[0-9]+' "${active_docs[@]}" || true)"
 [ -z "$hits" ] && pass 'active docs contain no hardcoded semantic versions' || { fail 'active docs hardcode semantic versions:'; printf '%s\n' "$hits"; }
 

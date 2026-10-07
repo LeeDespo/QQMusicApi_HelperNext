@@ -1,11 +1,6 @@
 //! 账号关系：用户主页、VIP、关注的歌手、粉丝、好友、关注的人、TA 创建的歌单。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/user.py` 的
-//! `get_homepage` / `get_vip_info` / `get_follow_singers` / `get_fans` /
-//! `get_friend` / `get_follow_user` / `get_created_songlist`；回值字段名照
-//! `models/user.py` 的同名模型（camelCase），模型层级也一样。同一模块的收藏、
-//! 音乐基因、不喜欢列表在 `user_asset.rs`；组件既有的 `fetch_followed_artists`
-//! 是「读自己关注的歌手」那条老契约，不动。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! # 平台档案
 //!

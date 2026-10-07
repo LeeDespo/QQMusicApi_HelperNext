@@ -1,7 +1,6 @@
 //! 歌曲资产：批量歌曲信息、CDN 调度、批量取流地址、其他版本、制作人、收藏数。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/song.py`（`SongApi`），
-//! 回值字段名照 `models/song.py` 的同名模型（camelCase）。六个端点：
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! * `query_songs` —— `music.trackInfo.UniformRuleCtrl / CgiGetTrackInfo`，
 //!   每项给 `id` 或 `mid` 之一，`types` 与 `modify_stamp` 同长；

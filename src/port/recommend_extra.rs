@@ -1,10 +1,6 @@
 //! 推荐扩展：首页信息流、雷达推荐、推荐歌单。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/recommend.py` 的
-//! `get_home_feed` / `get_radar_recommend` / `get_recommend_songlist`，
-//! 回值字段名照 `models/recommend.py` 的同名模型（camelCase），模型层级也一样。
-//! 同模块的 `get_guess_recommend` 与既有 `fetch_recommend_feed` 同端点、
-//! `get_recommend_newsong` 与既有 `fetch_new_songs` 同端点，都不重复移植。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! 三个端点：
 //! * 首页信息流 `music.recommend.RecommendFeed / get_recommend_feed`；

@@ -1,9 +1,6 @@
 //! MV：详情、播放地址、分类列表。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/mv.py`，
-//! 回值字段名照 `models/mv.py` 的同名模型（camelCase），模型层级也一样：
-//! 详情与播放地址的顶层都是「以 vid 为键的映射」（参考里挂在一个 `data` 字段上），
-//! 分类列表是 `total` + `items`。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! 三个端点：
 //! * 详情 `video.VideoDataServer / get_video_info_batch`，参数 `vidlist` 与长

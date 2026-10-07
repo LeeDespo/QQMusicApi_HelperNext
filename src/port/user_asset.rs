@@ -1,11 +1,6 @@
 //! 账号资产：收藏的歌单 / 专辑 / MV、音乐基因、不喜欢列表（含签名路）。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/user.py` 的
-//! `get_fav_songlist` / `get_fav_album` / `get_fav_mv` / `get_music_gene` /
-//! `get_dislike_list` / `add_dislike` / `cancel_dislike` /
-//! `cancel_all_dislike_song`；回值字段名照 `models/user.py` 的同名模型
-//! （camelCase），模型层级也一样。（同一模块里的账号关系、VIP、主页等接口
-//! 由其他领域文件承担，这里不重复移植。）
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! # 平台档案
 //!

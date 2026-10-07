@@ -1,10 +1,6 @@
 //! 歌曲关联：相似歌曲、标签、相关歌单、相关 MV、乐谱（含签名路）。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/song.py` 的
-//! `get_similar_song` / `get_labels` / `get_related_songlist` / `get_related_mv` /
-//! `get_sheet` / `has_sheet`，回值字段名照 `models/song.py` 的同名模型
-//! （`GetSimilarSongResponse` / `GetSongLabelsResponse` / `GetRelatedSonglistResponse` /
-//! `GetRelatedMvResponse` / `GetSheetResponse` / `HasSheetMusicResponse`，camelCase）。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! 上游三个模块：
 //! * `music.recommend.TrackRelationServer` —— 相似歌曲、标签、相关歌单（三个都在这里）；
