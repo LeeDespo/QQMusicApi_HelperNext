@@ -79,7 +79,7 @@ Rust .rlib
 - Windows / Linux 尚未完成适配与验证，不构建、不上传、不宣称支持（§13）；
 - `boltffi.toml` 的 `[targets.apple]` 配置为 `include_macos = false`，macOS 消费方式以
   `qqmusic-helper-next` stdio 子进程为主（§13.1）；
-- **wasm**：`boltffi.toml` 的 `[targets.wasm]` 已关闭（`enabled = false`，2026-10-07 起）——
+- **wasm**：`boltffi.toml` 的 `[targets.wasm]` 已关闭（`enabled = false`）——
   本机未安装 `wasm32-unknown-unknown` 工具链、`src/` 没有任何 wasm 相关代码、也没有任何验证记录。
   wasm 处于「未适配、未验证」状态，**任何人不得在 README、Release Notes 或其他文档中
   宣称支持 wasm**；启动适配时重新打开配置，并在本节回填工具链与验证方式；
@@ -133,11 +133,9 @@ qqmusic-helper-next-vX.Y.Z-macos-arm64/
 
 规则：
 
-- 当前仓库只有一个 binary target（`Cargo.toml` 的 `[[bin]] qqmusic-helper-next`），
+- 当前仓库只有一个正式 binary target（`Cargo.toml` 的 `[[bin]] qqmusic-helper-next`），
   包内只含这一个可执行文件；
-- **任何文档或注释不得描述不存在的 binary。** `Cargo.toml` 头部对该残留的
-  `qqmusic-helper-next-cli` 描述已在 X.Y.Z 发布前删除；在以本条为准的前提下，
-  不发布、不宣称 cli；
+- **任何文档或注释不得描述不存在的 binary**；正式资产名必须由当前 manifest 与发布脚本导出；
 - 不发布 `.rlib` 或裸 `.a` 当作通用二进制。
 
 ### 4.3 manifest.json
