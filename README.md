@@ -1,7 +1,6 @@
 <div align="center">
   <h1>QQMusicApi_HelperNext</h1>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-edition%202021-orange" alt="Rust"></a>
-  <a href="https://github.com/L-1124/QQMusicApi"><img src="https://img.shields.io/badge/based%20on-QQMusicApi-blue" alt="Based on QQMusicApi"></a>
   <a href="https://github.com/boltffi/boltffi"><img src="https://img.shields.io/badge/bindings-BoltFFI-purple" alt="BoltFFI"></a>
   <a href="https://github.com/LeeDespo/QQMusicApi_HelperNext/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-green" alt="License"></a>
 </div>
@@ -11,36 +10,30 @@
 > [!IMPORTANT]
 > **音乐平台不易，请尊重版权，支持正版。**
 
----
-
 ## 📖 介绍
 
-**这是一个基于 [QQMusicApi](https://github.com/L-1124/QQMusicApi) 的 Rust 跨平台组件。**
+**QQMusicApi_HelperNext 是一个面向 QQ 音乐互操作场景的 Rust 跨平台组件。**
 
-QQMusicApi 用 Python 实现了 QQ 音乐接口的完整协议工作（请求签名、公共参数、各接口的 module/method/param、
-响应模型的 jsonpath）。本项目把这套协议工作**移植到 Rust**，做成一个可以被多种宿主直接嵌入的组件：
+仓库本身负责 QQ 音乐协议调用、请求签名、响应解析、凭据与设备身份、限流/熔断以及下载引擎托管，
+并提供两个共享同一实现的调用面：
 
-* **一份 Rust 内核**：接口调用、请求签名、JSON 解析、凭据、限流、熔断、下载引擎托管都在这里；
-* **两个调用面、一个实现**：宿主可以把组件当子进程驱动（一行一个 JSON 的 stdio 协议），
-  也可以嵌入 [BoltFFI](https://github.com/boltffi/boltffi) 从同一份 `#[export]` 表面生成的
-  Swift / Kotlin 绑定；两条路汇入同一个方法表，对上游的 HTTP 只存在于内核一处；
-* **一份文档**：每个接口的上游形状、解析要点与验证边界都记录在 `docs/`，从下方导航进入。
+* **stdio 子进程**：一行一个 JSON，请求最终汇入统一的方法分发；
+* **BoltFFI typed API**：从同一份 Rust 公开表面生成 Swift / Kotlin 等绑定。
 
-它不解释"如何获取 QQ 音乐的数据"，那部分是 QQMusicApi 的文档；这里讲的是**组件如何被调用、如何实现、
-如何跨平台**。
+项目的协议与接口认知部分来源于 [QQMusicApi](https://github.com/L-1124/QQMusicApi)；
+当前架构、行为、测试与发布规则以**本仓库**为准，来源关系与许可证说明见 [NOTICE](NOTICE)。
 
-## 🧭 多端适配程度
+## 🧭 正式交付范围
 
-| 调用面 | 现状 |
+| 调用面 | 状态 |
 |---|---|
-| **stdio 子进程** `qqmusic-helper-next`（macOS ARM64） | ✅ **正式**：一行一个 JSON 的子进程协议，macOS 宿主的当前消费方式，也是 Release 的 macOS 交付面；协议行为有测试覆盖 |
-| **Android FFI**（BoltFFI，四 ABI） | ✅ **正式**：0.2.0 绑定与 JNI 库经 NeuMusic 集成并完成真账号只读与一次可逆写验证；四 ABI 编译与 16 KB 页对齐检查通过 |
-| **macOS Swift typed FFI** | ⚠️ **在用、待成套替换**：现有安装仍是 0.1.0 产物；0.2.0 绑定已生成，类型检查与真实 FFI 程序验证已在宿主侧完成（宿主仓库维护接入记录）。不随 Release 发布（`include_macos = false`） |
-| **iOS / Apple XCFramework** | ❌ 绑定可生成，但无验证记录，不随 Release 发布 |
-| **wasm** | ❌ `boltffi.toml` 配置已关闭（`enabled = false`）：无工具链、无适配代码、无验证记录，不得宣称支持；启动适配时再打开 |
-| **Windows / Linux** | ❌ 未适配 |
+| **stdio** `qqmusic-helper-next`（macOS ARM64） | ✅ GitHub Release 正式交付；协议行为有离线测试覆盖 |
+| **Android FFI**（BoltFFI，四 ABI） | ✅ GitHub Release 正式交付；打包检查包含四 ABI 与 16 KB page-size |
+| **Apple typed FFI** | ⚠️ 可生成绑定，但当前不作为正式 Release 资产 |
+| **wasm** | ❌ 未适配、未验证，配置关闭 |
+| **Windows / Linux 可执行交付** | ❌ 当前不发布 |
 
-「能生成」不等于「正式支持」：哪些平台随 Release 交付、资产如何成套打包，以
+“能生成”不等于“正式支持”。正式 Release 的目标、资产名与校验规则只以
 [docs/RELEASING.md](docs/RELEASING.md) 为准。
 
 ## 🚀 快速开始
@@ -51,7 +44,6 @@ QQMusicApi 用 Python 实现了 QQ 音乐接口的完整协议工作（请求签
 use qqmusic_api_helper_next::{api, configure, Configuration, Platform};
 
 fn main() -> Result<(), qqmusic_api_helper_next::HelperError> {
-    // 宿主自己的可写目录；组件不会去猜平台的路径。
     configure(Configuration {
         data_dir: "/path/to/app-support".into(),
         default_platform: Platform::Web,
@@ -87,73 +79,61 @@ if (loginStatus().loggedIn) {
 }
 ```
 
-### 作为子进程（一行一个 JSON）
+### 作为子进程
 
 ```sh
 echo '{"id":"1","method":"get_helper_info","params":{}}' | qqmusic-helper-next
-# {"id":"1","ok":true,"helper":{"helperVersion":"0.2.0","protocolVersion":2,…}}
+# {"id":"1","ok":true,"helper":{"helperVersion":"<component-version>","protocolVersion":2,…}}
 ```
 
-生成绑定与打包：
-
-```sh
-cargo install boltffi_cli
-boltffi generate swift     # → dist/apple/Sources/*.swift
-boltffi generate kotlin    # → dist/android/kotlin/…/*.kt
-boltffi pack apple         # → dist/apple 的 xcframework / Package.swift
-boltffi pack android       # → dist/android 的 jniLibs
-```
-
-`dist/` 不进版本库；bindings 与 native library 必须同版本成套生成、成套替换，规则见
-[docs/ffi.md](docs/ffi.md)。
+生成绑定与本地打包时，工具版本应与 Release workflow 的固定版本保持一致；具体命令与兼容规则见
+[docs/ffi.md](docs/ffi.md)。`dist/` 是构建输出，不进版本库。
 
 ## ✨ 能力概要
 
 **账号**：登录状态、网页 cookie 导入、凭据刷新、退出登录；扫码与手机验证码登录端点；
-我喜欢、歌单、收藏专辑、关注的歌手等账号资产与关系读取，歌单与收藏类可逆写入
-（`set_liked` / 数字 ID 回执 `set_liked_by_id`）。
+我喜欢、歌单、收藏专辑、关注歌手等账号资产与关系读取，以及受保护的可逆写操作。
 
-**曲库**：搜索（全部 10 个类型）、歌单 / 排行榜 / 专辑 / 歌手 / MV / 电台 / 推荐、新歌与新碟上架；
-歌词（整行 / **逐字毫秒** / 音译 / 翻译 / 助唱标注）；六档音质阶梯取流与批量取流；
-评论（数量 / 热评 / 新评 / 发 / 删）；本地曲库封面匹配。
+**曲库**：搜索、歌单 / 排行榜 / 专辑 / 歌手 / MV / 电台 / 推荐、新歌与新碟；
+歌词（整行 / 逐字 / 音译 / 翻译 / 助唱标注）；多档音质取流与批量取流；
+评论读写；本地曲库封面匹配。
 
-**运行时**：按内容类别分桶的限流与熔断（可配置）、Aria2 下载引擎托管（排队 / 进度 / 暂停 / 取消）。
+**运行时**：按内容类别分桶的限流与熔断、Aria2 下载引擎托管。
 
-每个方法背后的上游 module / method、参数与回值见[接口清单](docs/endpoints.md)；
-分页语义、平台档案等不直观但必须照做的解析规则见[解析要点](docs/parsing.md)。
+公开方法、上游 module / method、参数与回值见 [接口清单](docs/endpoints.md)；
+分页、平台档案与字段映射等实现约束见 [解析要点](docs/parsing.md)。
 
 ## 📚 文档导航
 
-* **[docs/README.md](docs/README.md)** —— 文档门户：全部文档按主题索引
-* **[docs/endpoints.md](docs/endpoints.md)** —— 接口清单（当前接口事实）
-* **[docs/ffi.md](docs/ffi.md)** —— FFI 契约与成套更新规则
-* **[docs/pending.md](docs/pending.md)** —— 未完成能力与验证边界
-* **[docs/RELEASING.md](docs/RELEASING.md)** —— 发布规则（唯一发布真源）
+* **[docs/README.md](docs/README.md)** —— 文档门户
+* **[docs/endpoints.md](docs/endpoints.md)** —— 组件公开方法与上游接口契约
+* **[docs/parsing.md](docs/parsing.md)** —— 长期解析与兼容规则
+* **[docs/ffi.md](docs/ffi.md)** —— FFI 契约与绑定生成规则
+* **[docs/testing.md](docs/testing.md)** —— 测试分层与真实账号安全规则
+* **[docs/pending.md](docs/pending.md)** —— 组件自身尚未实现 / 尚未验证的范围
+* **[docs/RELEASING.md](docs/RELEASING.md)** —— 发布规则唯一真源
 * **[CHANGELOG.md](CHANGELOG.md)** —— 对外变化记录
-* **[AGENTS.md](AGENTS.md)** —— 仓库守则（Agent / 贡献者开工先读）
-* **[docs/history/](docs/history/)** —— 历史验证报告与取证记录
+* **[docs/history/](docs/history/)** —— 历史验证与审计记录
 
 ## ⚠️ 用途声明
 
-本项目基于 QQMusicApi 对 QQ 音乐客户端接口行为的研究与实现，仅用于技术研究、学习、
-个人使用及互操作性验证。
+本项目仅用于技术研究、学习、个人使用及互操作性验证。
 
 项目作者不鼓励、亦不认可将本项目用于商业服务、批量数据获取、版权内容再分发或其他可能
 侵犯腾讯、QQ 音乐及相关权利人权益的用途。请尊重版权并支持正版。
 
-本项目的软件代码依据 **GNU GPL v3.0 or later** 提供；上述用途声明表达项目定位与作者立场，
-不改变 GPL-3.0-or-later 本身授予的权利。使用者须自行确保其行为符合相关服务条款、
+软件代码依据 **GPL-3.0-or-later** 提供；上述用途声明表达项目定位与作者立场，
+**不构成额外许可证限制，也不改变 GPL 授予的权利**。使用者须自行确保行为符合服务条款、
 版权规定及适用法律。
 
 ## 📄 许可证与第三方声明
 
-* 软件许可证：**[GNU General Public License v3.0 or later](LICENSE)**，与 [QQMusicApi](https://github.com/L-1124/QQMusicApi)
-  保持一致——本项目是它的 Rust 移植，协议工作与接口认知来自该项目。
-* 第三方来源、非官方关系与权利边界见根目录 [NOTICE](NOTICE)；依赖的许可证汇总随发布包
-  携带（`THIRD-PARTY-LICENSES.txt`，由 `scripts/release/third-party-licenses.sh` 生成）。
+* 软件许可证：**[GPL-3.0-or-later](LICENSE)**。
+* 协议研究来源、非官方关系与权利边界见 [NOTICE](NOTICE)。
+* Release 包携带依赖许可证汇总 `THIRD-PARTY-LICENSES.txt`，由发布脚本根据锁定依赖生成。
 
 ## 👥 致谢
 
-* [QQMusicApi](https://github.com/L-1124/QQMusicApi) —— 本项目的协议与接口来源
+* [QQMusicApi](https://github.com/L-1124/QQMusicApi) —— 协议与接口研究的重要来源
 * [BoltFFI](https://github.com/boltffi/boltffi) —— 跨语言绑定生成
 * [ureq](https://github.com/algesten/ureq) / [serde](https://github.com/serde-rs/serde) —— HTTP 与序列化

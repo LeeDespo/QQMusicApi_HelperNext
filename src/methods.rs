@@ -1,15 +1,9 @@
-//! The endpoints this component serves, in the wire shape the app already
-//! decodes.
+//! Shared method registry and JSON protocol dispatch.
 //!
-//! The component deliberately speaks the *same* JSON protocol as the Python
-//! helper it replaces — one request per line, `{"id", "method", "params"}`, and a
-//! reply carrying the same `id` back. Two reasons: the app's process client
-//! already implements that transport (so the swap is a binary path, not a
-//! rewrite), and any method that is not ported yet keeps working during the
-//! migration.
-//!
-//! Payload mapping notes, endpoint by endpoint, live in `docs/qqmusic/25-*`;
-//! every request shape below is copied from the library the old helper used.
+//! The stdio adapter and typed API converge on this production method surface;
+//! neither calling convention owns a second endpoint implementation.
+//! Human-readable endpoint contracts live in `docs/endpoints.md`, with parsing
+//! and compatibility rules in `docs/parsing.md`.
 
 use crate::credential::{credential_from_cookies, Credential};
 use crate::guard::Class;
@@ -19,11 +13,10 @@ use crate::upstream::{
 };
 use serde_json::{json, Value};
 
-pub const COMPONENT_VERSION: &str = "0.2.0";
-/// The protocol the app speaks; unchanged from the Python helper.
+pub const COMPONENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Version of the public stdio JSON protocol.
 pub const PROTOCOL_VERSION: i32 = 2;
-/// The library the old helper shipped, reported so both components answer
-/// `get_helper_info` with the same field set.
+/// Compatibility field reported by `get_helper_info`.
 const LIBRARY_VERSION: &str = "HelperNext (Rust, 无 Python 依赖)";
 /// "我喜欢" lives in the reserved folder with this id.
 const LIKED_SONGS_DIRID: i64 = 201;

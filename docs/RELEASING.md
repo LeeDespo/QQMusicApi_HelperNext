@@ -4,8 +4,8 @@
 > 修改发布语义只改这里，并在 AGENTS.md / README 的发布路由保持指向本文件。
 >
 > 适用仓库：`LeeDespo/QQMusicApi_HelperNext`
-> 组件版本基线：**0.2.0**（`Cargo.toml` 与 `src/methods.rs` 的 `COMPONENT_VERSION`）
-> BoltFFI：**0.31.0**
+> 组件版本唯一真源：`Cargo.toml package.version`；代码通过 `CARGO_PKG_VERSION` 读取，不再手写第二份版本号。
+> 精确构建工具版本：以 `.github/workflows/release.yml` 的固定值及生成的 release manifest 为准，本文件只描述规则。
 > 当前发布范围：**macOS ARM64 stdio 子进程 + Android BoltFFI**
 > 暂不发布：Windows、Linux、Apple FFI（macOS/iOS XCFramework）、**wasm**（见 §2.2）
 >
@@ -16,11 +16,11 @@
 
 ## 1. 目标
 
-GitHub Release 是组件的正式交付面。消费端（macOS 播放器、NeuMusic 等）**不依赖**：
+GitHub Release 是组件的正式交付面。消费端**不依赖**：
 
 - 本地 clone HelperNext 源码；
 - dirty working tree；
-- `source.patch`；
+- `消费端本地补丁`；
 - 本地安装 Rust / Android NDK / BoltFFI 后自行构建；
 - 手工复制某一个 `.so` 或某一份 Kotlin binding；
 - 无法追溯来源的裸二进制。
@@ -93,11 +93,11 @@ Rust .rlib
 
 ## 3. Release 资产清单
 
-Release 页面只出现以下资产（以 v0.2.0 为例）：
+Release 页面只出现以下资产（以 vX.Y.Z 为例）：
 
 ```text
-qqmusic-helper-next-v0.2.0-macos-arm64.tar.gz
-qqmusic-helper-next-v0.2.0-android.zip
+qqmusic-helper-next-vX.Y.Z-macos-arm64.tar.gz
+qqmusic-helper-next-vX.Y.Z-android.zip
 release-manifest.json
 SHA256SUMS
 THIRD-PARTY-LICENSES.txt
@@ -106,7 +106,7 @@ THIRD-PARTY-LICENSES.txt
 以及 GitHub 自动提供的 `Source code (zip / tar.gz)`（与 tag 一一对应）。
 
 - `macos-arm64.tar.gz`：供直接启动 HelperNext 子进程的 macOS 消费端使用；
-- `android.zip`：供 NeuMusic 等 Android 宿主使用；
+- `android.zip`：供 Android FFI 消费端使用；
 - `release-manifest.json`：机器可读的 Release 元数据；
 - `SHA256SUMS`：所有 Release 资产的哈希，CI 生成、不手填；
 - `THIRD-PARTY-LICENSES.txt`：第三方依赖许可证汇总。
@@ -117,13 +117,13 @@ THIRD-PARTY-LICENSES.txt
 
 ### 4.1 文件名
 
-统一 `qqmusic-helper-next-v${VERSION}-macos-arm64.tar.gz`（如 `qqmusic-helper-next-v0.2.0-macos-arm64.tar.gz`）。
+统一 `qqmusic-helper-next-v${VERSION}-macos-arm64.tar.gz`（如 `qqmusic-helper-next-vX.Y.Z-macos-arm64.tar.gz`）。
 禁止模糊命名：`helper.zip`、`release.zip`、`mac-build.tar.gz`、裸的 `qqmusic-helper-next`。
 
 ### 4.2 包内容
 
 ```text
-qqmusic-helper-next-v0.2.0-macos-arm64/
+qqmusic-helper-next-vX.Y.Z-macos-arm64/
 ├── qqmusic-helper-next      # 唯一正式 executable（src/bin/stdio.rs）
 ├── LICENSE
 ├── NOTICE
@@ -136,7 +136,7 @@ qqmusic-helper-next-v0.2.0-macos-arm64/
 - 当前仓库只有一个 binary target（`Cargo.toml` 的 `[[bin]] qqmusic-helper-next`），
   包内只含这一个可执行文件；
 - **任何文档或注释不得描述不存在的 binary。** `Cargo.toml` 头部对该残留的
-  `qqmusic-helper-next-cli` 描述已在 0.2.0 发布前删除；在以本条为准的前提下，
+  `qqmusic-helper-next-cli` 描述已在 X.Y.Z 发布前删除；在以本条为准的前提下，
   不发布、不宣称 cli；
 - 不发布 `.rlib` 或裸 `.a` 当作通用二进制。
 
@@ -145,7 +145,7 @@ qqmusic-helper-next-v0.2.0-macos-arm64/
 ```json
 {
   "name": "QQMusicApi_HelperNext",
-  "componentVersion": "0.2.0",
+  "componentVersion": "X.Y.Z",
   "protocolVersion": 2,
   "gitCommit": "<FULL_GIT_SHA>",
   "target": "aarch64-apple-darwin",
@@ -171,8 +171,7 @@ Android FFI 资产作为一个**不可拆分的原子包**发布。BoltFFI 的�
 禁止消费端自行组合旧 Kotlin + 新 `.so`（或任何形式的混搭）；禁止只替换一个 ABI、
 只替换 Kotlin binding。这与 [ffi.md](ffi.md) 的成套更新规则是同一条纪律。
 
-Kotlin 包名 `com.example.qqmusic_api_helper_next` 是既有消费契约（`boltffi.toml` 的
-`[targets.android.kotlin].package`），改名即破坏 NeuMusic。它作为**已知瑕疵**保留，暂不修改；
+Kotlin 包名由 `boltffi.toml` 的 `[targets.android.kotlin].package` 定义，并已进入公开绑定契约；变更会破坏现有消费者兼容性，必须按 breaking change 处理。
 若未来确要改，按契约变更走 [pending.md](pending.md) 的评审流程并成套发布。
 
 ### 5.2 文件名
@@ -182,7 +181,7 @@ Kotlin 包名 `com.example.qqmusic_api_helper_next` 是既有消费契约（`bol
 ### 5.3 包结构
 
 ```text
-qqmusic-helper-next-v0.2.0-android/
+qqmusic-helper-next-vX.Y.Z-android/
 ├── kotlin/
 │   ├── com/example/qqmusic_api_helper_next/QqmusicApiHelperNext.kt
 │   └── jni/
@@ -209,10 +208,10 @@ qqmusic-helper-next-v0.2.0-android/
 ```json
 {
   "name": "QQMusicApi_HelperNext",
-  "componentVersion": "0.2.0",
+  "componentVersion": "X.Y.Z",
   "protocolVersion": 2,
   "gitCommit": "<FULL_GIT_SHA>",
-  "boltffi": "0.31.0",
+  "boltffi": "${BOLTFFI_VERSION}",
   "rustc": "<RUSTC_VERSION>",
   "androidNdk": "<NDK_VERSION>",
   "minSdk": 24,
@@ -242,24 +241,24 @@ qqmusic-helper-next-v0.2.0-android/
 ```json
 {
   "name": "QQMusicApi_HelperNext",
-  "version": "0.2.0",
-  "tag": "v0.2.0",
+  "version": "X.Y.Z",
+  "tag": "vX.Y.Z",
   "protocolVersion": 2,
   "gitCommit": "<FULL_GIT_SHA>",
   "sourceTreeClean": true,
   "toolchain": {
     "rustc": "<RUSTC_VERSION>",
     "cargo": "<CARGO_VERSION>",
-    "boltffi": "0.31.0",
+    "boltffi": "${BOLTFFI_VERSION}",
     "androidNdk": "<NDK_VERSION>"
   },
   "artifacts": {
-    "qqmusic-helper-next-v0.2.0-macos-arm64.tar.gz": {
+    "qqmusic-helper-next-vX.Y.Z-macos-arm64.tar.gz": {
       "kind": "stdio-binary",
       "target": "aarch64-apple-darwin",
       "sha256": "<SHA256>"
     },
-    "qqmusic-helper-next-v0.2.0-android.zip": {
+    "qqmusic-helper-next-vX.Y.Z-android.zip": {
       "kind": "boltffi-android",
       "abis": ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"],
       "sha256": "<SHA256>"
@@ -275,8 +274,8 @@ qqmusic-helper-next-v0.2.0-android/
 Release 顶层必须提供 `SHA256SUMS`，覆盖全部资产：
 
 ```text
-<sha>  qqmusic-helper-next-v0.2.0-macos-arm64.tar.gz
-<sha>  qqmusic-helper-next-v0.2.0-android.zip
+<sha>  qqmusic-helper-next-vX.Y.Z-macos-arm64.tar.gz
+<sha>  qqmusic-helper-next-vX.Y.Z-android.zip
 <sha>  release-manifest.json
 <sha>  THIRD-PARTY-LICENSES.txt
 ```
@@ -298,7 +297,7 @@ shasum -a 256 <file>             # macOS 自带
 Git tag = Cargo.toml version = Release version
 ```
 
-例：`Cargo.toml` `version = "0.2.0"` ↔ tag `v0.2.0` ↔ Release `v0.2.0`。不一致即失败。
+例：`Cargo.toml` `version = "X.Y.Z"` ↔ tag `vX.Y.Z` ↔ Release `vX.Y.Z`。不一致即失败。
 
 ### 9.2 禁止 dirty tree 发布
 
@@ -310,7 +309,7 @@ git diff --cached --exit-code
 test -z "$(git status --porcelain)"
 ```
 
-任一失败即停止 Release。禁止「base revision + `source.patch`」作为正式发布方式
+任一失败即停止 Release。禁止「base revision + `消费端本地补丁`」作为正式发布方式
 （消费端契约见 §12）。
 
 ### 9.3 Release 只能从 tag 构建
@@ -375,7 +374,7 @@ macos       android
 
 ### 10.5 Android build job
 
-- Runner `ubuntu-latest`；固定 Rust toolchain、Android NDK、BoltFFI 0.31.0，禁止 `latest` 漂移；
+- Runner 与工具链版本由 release workflow 明确固定；禁止关键构建工具使用未固定的 `latest` 漂移；
 - 构建：`boltffi pack android --release --deny-skipped`。正式 Release 必须带 `--deny-skipped`——
   不允许某个 API 生成失败时只打印警告仍继续发布；
 - **四 ABI 完整性**：`dist/android/jniLibs/{arm64-v8a,armeabi-v7a,x86,x86_64}/
@@ -404,37 +403,20 @@ macos       android
 
 ---
 
-## 12. 消费端接入契约（NeuMusic 更新方式）
+## 12. 对外分发契约
 
-本仓库对外承诺的只有三样：**固定资产名 + release-manifest.json + SHA256SUMS**。
-职责边界：**本仓库负责构建并发布组件；宿主负责下载、校验、消费**——宿主不再负责
-重新构建 HelperNext，也不需要安装 Rust 或 BoltFFI。这是两个仓库最重要的职责分离。
+本仓库只承诺**发布资产、机器可读 manifest 与 checksum 的可验证性**。消费端如何保存自己的
+版本锁、下载缓存、staging / 原子替换目录，属于消费端仓库职责，不在这里规定。
 
-NeuMusic（及其他宿主）的更新方式固定为：
+生产方边界：
 
-```text
-读取 helpernext.lock.json（锁定用的 Release 版本/资产/SHA）
-        ↓
-下载 android.zip 与 release-manifest.json / SHA256SUMS
-        ↓
-校验 SHA256
-        ↓
-解压到 staging
-        ↓
-检查 manifest（版本、commit、文件哈希）
-        ↓
-原子替换 app/helpernext/
-        ↓
-Gradle test/build
-```
+- Release 资产名遵循本文约定，并与 tag / component version 一致；
+- `release-manifest.json` 给出 commit、版本、目标与文件哈希；
+- `SHA256SUMS` 覆盖正式上传资产；
+- 正式产物只能由 tag 触发的 Release workflow 生成；
+- 本仓库不提交消费端的 lock 文件、安装目录、补丁重建脚本或应用内升级状态。
 
-- 宿主侧维护 `helpernext.lock.json`，让「这个版本的 App 用哪个 HelperNext Release」
-  成为 git 历史里可回答的问题；
-- 更新脚本只做上面这条链，**不再** fetch HelperNext 源码、checkout revision、apply
-  `source.patch`、安装/调用 boltffi、编译 Rust；
-- `source.patch` 允许存在于本地实验、临时验证与未提交开发；**禁止**正式 master 依赖
-  dirty HelperNext patch 重建正式组件。正式路径只有一条：
-  HelperNext 修改 → commit → tag → Release → 宿主更新 lock。
+消费端若需要固定某个 Release，应在**自己的仓库**维护版本锁与校验值；这里不复制其实现。
 
 ---
 
@@ -466,13 +448,13 @@ Linux executable 发布；Linux runner 只用于测试与 Android 构建。
 每次 Release 使用统一结构：
 
 ```markdown
-# QQMusicApi_HelperNext v0.2.0
+# QQMusicApi_HelperNext vX.Y.Z
 
 ## Compatibility
 
-- Component: 0.2.0
+- Component: X.Y.Z
 - JSON protocol: 2
-- BoltFFI: 0.31.0
+- BoltFFI: ${BOLTFFI_VERSION}
 
 ## Supported release targets
 
@@ -495,8 +477,8 @@ Windows, Linux, Apple FFI and wasm are not currently released or supported.
 
 ## Artifacts
 
-- qqmusic-helper-next-v0.2.0-macos-arm64.tar.gz
-- qqmusic-helper-next-v0.2.0-android.zip
+- qqmusic-helper-next-vX.Y.Z-macos-arm64.tar.gz
+- qqmusic-helper-next-vX.Y.Z-android.zip
 
 Verify all assets with `SHA256SUMS`.
 ```
@@ -518,7 +500,7 @@ Android Kotlin 与 .so 分开更新
 只替换一个 ABI
 只替换 Kotlin binding
 消费端自己维护 HelperNext raw protocol 副本
-NeuMusic 正式版本依赖 source.patch
+具体消费端 正式版本依赖 消费端本地补丁
 发布未经验证的 Windows / Linux binary
 当前阶段发布未经验证的 Apple FFI / XCFramework
 宣称支持 wasm 或发布 wasm 产物
@@ -551,7 +533,7 @@ NeuMusic 正式版本依赖 source.patch
 
 **Android**
 
-- [ ] BoltFFI 版本固定 0.31.0；`--deny-skipped` 生效
+- [ ] BoltFFI 使用 release workflow 固定版本；`--deny-skipped` 生效
 - [ ] Kotlin binding 生成成功；四 ABI `.so` 全部存在且与 Kotlin 同一次构建
 - [ ] 16 KB page-size 检查通过；manifest 完整、逐文件 SHA256 完整
 
@@ -566,29 +548,6 @@ NeuMusic 正式版本依赖 source.patch
 - [ ] 未上传 Windows / Linux 可执行文件，README 未宣称支持
 - [ ] 未上传未经验证的 Apple FFI / XCFramework 与 wasm 产物
 
-**消费端（NeuMusic）**
-
-- [ ] `helpernext.lock.json` 锁定 Release 版本；更新脚本下载 Release 资产并校验 SHA256
-- [ ] staging + 原子替换；更新不需要安装 Rust 或 BoltFFI
-- [ ] 正式流程不依赖 `source.patch`
-
----
-
-## 17. 实施状态
-
-规则已生效，以下事项**尚未落地**，完成时回填本节：
-
-| 事项 | 状态 | 依赖 |
-|---|---|---|
-| `.github/workflows/release.yml` | 已创建（validate → macos → android → release） | — |
-| macOS / Android 打包与 manifest/SHA256SUMS/许可证脚本 | 已创建（`scripts/release/`） | — |
-| `Cargo.toml` 头部残留的 `qqmusic-helper-next-cli` 注释 | 已修正 | — |
-| NeuMusic 切换 lock + Release 下载 | 未切换 | 本仓库首个正式 Release；宿主侧实现见 §12 |
-| 消费端 `helpernext.lock.json` 约定 | 未落地 | 宿主仓库侧实现，见 §12 |
-
-自动发布落地后，分发方式仍维持现状：NeuMusic 从本仓库构建产物接入，macOS 宿主使用本地构建的
-stdio 二进制；改为「下载 Release 资产 + 校验 SHA256」是宿主侧的下一步（§12）。§9 的
-tag/clean-tree/成套纪律对任何分发方式同样生效。
 
 ---
 

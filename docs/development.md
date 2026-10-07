@@ -37,7 +37,7 @@ grep -n "方法英文名" src/port/*/METHODS src/methods.rs
 
 - 参考实现里的别名（如 like/unlike→`set_liked`、推荐流/新歌的复用入口）**复用既有方法**，不另开新名字；
 - 同一上游端点只允许一个实现；类型化包装只是薄壳，把请求交给协议层再解析成模型；
-- 参考快照（`dist/reference/QQMusicApi/`，不进版本库）是 module/method/param 的对错判据。
+- 现行 module / method / param 的仓库内契约以生产实现与 [endpoints.md](endpoints.md) 为准。新增能力研究可以查阅 QQMusicApi 的公开仓库并固定到明确 commit/tag，但不得把未跟踪的本地参考快照变成活文档依赖或第二真源。
 
 ## 4. 新增 endpoint 检查表（port 层）
 
@@ -89,7 +89,7 @@ grep -n "方法英文名" src/port/*/METHODS src/methods.rs
 
 ## 9. 凭据规则
 
-- 凭据读写只在 `src/credential.rs`（与被替换的 Python helper 同一文件、同一键集，可互换）；
+- 凭据读写只在 `src/credential.rs`；需要兼容既有凭据格式时，由这里统一维护，不在其他模块复制键集；
 - `g_tk = hash33(qm_keyst)`；cookie 头由组件组装，宿主只给 `uin` + `qm_keyst`
   （可选 `encrypt_uin`，走 `import_credential_with_encrypt_uin`）；
 - **凭据与密钥不进 git、不进日志、不进文档、不进测试报告**；stdio 回包与 stderr 日志同样不得出现。

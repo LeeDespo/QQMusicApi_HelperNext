@@ -11,7 +11,7 @@
 两个调用面，一条实现路径：
 
 ```text
-macOS 宿主（子进程）              Android 宿主（如 NeuMusic）
+macOS 宿主（子进程）              Android 宿主（typed FFI）
    │ stdin/stdout 一行一个 JSON        │ BoltFFI 生成的 Kotlin 绑定
    ▼                                  ▼
 src/bin/stdio.rs                    #[export] 类型化 API
@@ -76,7 +76,7 @@ port 层，而既有代码是已上线契约、不能被顺手改动——把两
 | `src/port/signed.rs` | `musics.fcg` 的 `zzc` 签名（SHA-1 移植，照抄参考实现，签名对不上直接回 `2000`） | 不「发明等价算法」；签名必须作用于实际发送的字节 |
 | `src/upstream.rs` | 唯一的 QQ 上游 HTTP；`Platform`（web/android）档案的 `comm` 叠加；挂载限流器、熔断器、设备身份、`encrypt_uin` 缓存 | 其他任何模块不得对 QQ 上游发 HTTP |
 | `src/guard.rs` | 按内容类别分桶的限流（Read/Interactive/Playback/Account/Write，超限等待不丢弃）与熔断（阈值开路、半开探测） | 不在调用方各自实现节流 |
-| `src/credential.rs` | 凭据读写（与被替换的 Python helper 同一文件，可互换）、`g_tk = hash33(qm_keyst)`、cookie 头组装 | 凭据不进日志、不进回包、不进文档 |
+| `src/credential.rs` | 凭据读写与兼容格式、`g_tk = hash33(qm_keyst)`、cookie 头组装 | 凭据不进日志、不进回包、不进文档 |
 | `src/device.rs` | QIMEI 设备身份（RSA+AES 协议复刻），生成一次存盘，仅 android 档案使用 | 不重复申请设备身份；HTTP 复用传入的共享 agent |
 | `src/aria2.rs` | 本地下载引擎托管：按需启动、JSON-RPC over loopback、宿主消失时随进程退出 | 不把 aria2 的 RPC 混入上游 agent；不常驻后台 |
 | `src/login.rs` | QQ 扫码登录五步（`ptqrshow` → 轮询 → `check_sig` → authorize → QQLogin），流程无状态 | 不在组件里保存登录会话状态 |

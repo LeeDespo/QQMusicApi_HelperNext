@@ -17,12 +17,15 @@ jobs:
           components: clippy
 
       - name: cargo test
-        run: cargo test --all-targets
+        run: cargo test --all-targets --locked
 
       # 先逐步引入：暂不加 -D warnings，待告警清零后再收紧为必需步骤。
       # 按仓库规则不放 cargo fmt --check：只允许对改动文件跑 rustfmt --edition 2021 <文件>。
+      - name: Offline write-harness safety tests
+        run: python3 tests/test_write_smoke.py
+
       - name: cargo clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets --locked
 
       - name: Repository structure rules
         run: bash scripts/check_repository_rules.sh
