@@ -1,10 +1,6 @@
 //! 登录扩展：微信扫码、手机验证码、凭据刷新。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/login.py`
-//! （`_get_wx_qr` / `_check_wx_qr` / `_authorize_wx_qr`、`send_authcode` /
-//! `phone_authorize`、`refresh_credential`）。QQ 扫码与 cookie 导入已由既有
-//! `src/login.rs` 覆盖，不在这里重复；手机客户端二维码（MQTT）不移植，
-//! 见文件尾的说明。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! # 平台档案
 //!

@@ -41,9 +41,9 @@ const RESULT_NO_PERMISSION: i64 = 104003;
 const RESULT_VKEY_FAILED: i64 = 104004;
 const RESULT_DEVICE_RESTRICTED: i64 = 104013;
 
-/// The provenance the Python helper stamped on every enrichment payload. The
-/// app reads these keys (and refuses a detail whose confidence is too low), so
-/// they are part of the protocol, not decoration.
+/// Stable provenance carried on enrichment payloads. Consumers read these
+/// keys (and may reject a detail whose confidence is too low), so they are part
+/// of the protocol rather than decoration.
 const SOURCE: &str = "qqmusic";
 
 /// The profile a search has to run under.
@@ -107,7 +107,7 @@ fn candidate_text(candidate: &Value, key: &str) -> String {
         .to_string()
 }
 
-/// A candidate's confidence, defaulting the way the Python helper did.
+/// A candidate's confidence with the protocol-compatible fallback.
 fn candidate_confidence(candidate: &Value, fallback: f64) -> f64 {
     candidate
         .get("confidence")
@@ -145,18 +145,17 @@ fn content_group(value: &Value, key: &str) -> Vec<String> {
 /// What the caller knows about the song it wants prose for.
 ///
 /// The app asks for this both from the online pages (a mid in hand) and from the
-/// local library's enrichment (a title/artist/album off a file's tags and no mid
-/// at all), so a name-only request resolves the mid through the search first —
-/// exactly what the Python helper did, and the reason this method cannot simply
-/// demand a mid.
+/// local-library enrichment (a title/artist/album from file tags and no mid at
+/// all), so a name-only request resolves the mid through search first. This is
+/// why the method cannot simply require a mid.
 #[derive(Debug, Clone, Default)]
 pub struct SongDetailQuery<'a> {
     pub song_mid: Option<&'a str>,
     pub title: &'a str,
     pub artist: &'a str,
     pub album: &'a str,
-    /// Sent by the app and ignored here, exactly as the Python helper ignored
-    /// it: the catalogue's search does not rank by duration.
+    /// Accepted for protocol compatibility and ignored here: catalogue search
+    /// does not rank by duration.
     #[allow(dead_code)]
     pub duration: Option<i64>,
 }
@@ -2017,8 +2016,8 @@ fn map_playlist(item: &Value) -> Option<Value> {
 
 // MARK: - Artwork and biography matching (the local library's enrichment)
 
-/// The confidence the Python helper assigned by rank, kept identical so the
-/// app's own scoring sees the same numbers it always has.
+/// Rank-based compatibility confidence. Keep these published scoring values
+/// stable for consumers that combine them with their own matching score.
 fn rank_confidence(index: usize) -> f64 {
     (0.86 - index as f64 * 0.04).max(0.50)
 }

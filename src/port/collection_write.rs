@@ -1,10 +1,6 @@
 //! 集合写入：自建歌单的增删、歌单歌曲的增删，以及收藏专辑的加/取消。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/songlist.py`
-//! （`create` / `delete` / `add_songs` / `del_songs`）与 `modules/album.py`
-//! （`fav_album` / `del_fav_album`）；回值字段名照 `models/songlist.py` 的
-//! `CreateDeleteSonglistResp` 与 `models/album.py` 的 `AlbumFavWriteResponse`
-//! （camelCase）。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! 八个端点：
 //!

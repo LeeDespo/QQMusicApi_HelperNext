@@ -6,8 +6,7 @@
 //! learn about `RatelimitedError`), and a burst of page loads must not become a
 //! burst of upstream requests.
 //!
-//! The shape follows what the app's settings already expose for the old helper's
-//! breaker, so the settings keep meaning the same thing:
+//! The public settings preserve stable limiter and breaker semantics:
 //!
 //! * **rate limit** — a sliding window per endpoint class: at most `max_calls`
 //!   in `window`. Calls over the limit wait (they are not dropped: every caller

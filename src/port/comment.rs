@@ -1,10 +1,6 @@
 //! 评论：数量、热评、新评、推荐评、时刻评论，以及发/删评论。
 //!
-//! 参考：`dist/reference/QQMusicApi/qqmusic_api/modules/comment.py`，
-//! 回值字段名照 `models/comment.py` 的同名模型（camelCase）。
-//! 上游是 `music.globalComment.*` 系列，走 `musicu.fcg`，平台档案用调用方给的
-//! 那一个（参考的 `@cgi_endpoint` 没有标平台，按本层约定默认 Web）。
-//! 本文件由移植工作流的一个子代理独占；不要在此文件之外修改任何内容。
+//! 当前公开契约见 `docs/endpoints.md`，解析与兼容规则见 `docs/parsing.md`。
 //!
 //! 业务类型（参考 `CommentBizType`）：1=歌曲 2=专辑 3=歌单 4=MV 15=长音频；
 //! `bizId` 一律按数字给出，到协议上再转成字符串。

@@ -1,11 +1,9 @@
-//! The credential the component reads and writes.
+//! Credential persistence and compatibility format.
 //!
-//! Deliberately the *same file* the Python helper used
-//! (`~/Library/Application Support/kmgccc.player/QQMusicHelper/Credential/qqmusic-credential.json`):
-//! an existing login keeps working, and the two components can be swapped back
-//! and forth while the old one is still around. The keys are the upstream's own
-//! (`musicid`, `musickey`, `encrypt_uin`, …), plus `str_musicid`, which the
-//! library preferred and the app's web path read first.
+//! The caller supplies the writable data directory; this module owns the
+//! credential file format within it. Keys follow the upstream session fields
+//! (`musicid`, `musickey`, `encrypt_uin`, …), plus the compatibility alias
+//! `str_musicid`.
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -28,7 +26,7 @@ pub fn hash33_seeded(key: &str, seed: u32) -> u32 {
 }
 
 /// The `cgi-bin/musicu.fcg` request needs `g_tk` — `hash33` of the music key
-/// starting from 5381. Same algorithm the Python helper and the library use.
+/// starting from 5381.
 pub fn hash33(key: &str) -> u32 {
     hash33_seeded(key, 5381)
 }
@@ -145,8 +143,8 @@ impl CredentialStore {
 
     /// Write the credential, keeping every key we do not own.
     ///
-    /// The file is written through a temporary and renamed, so a reader (the app,
-    /// or the old helper during a swap) never sees a half-written credential.
+    /// The file is written through a temporary and renamed so concurrent or
+    /// external readers never observe a half-written credential.
     pub fn store(&self, credential: &Credential) -> std::io::Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -180,8 +178,7 @@ impl CredentialStore {
 /// Build a credential from the cookies a browser/web-login flow handed over.
 ///
 /// `qm_keyst` is both the session ticket and the playback ticket the CDN wants,
-/// so a cookie import is a complete login — the same equivalence the README
-/// records for the two login paths the old helper offered.
+/// so a cookie import contains the session material required by the component.
 pub fn credential_from_cookies(cookies: &Value) -> Option<Credential> {
     let get = |name: &str| -> Option<String> {
         cookies
@@ -221,7 +218,7 @@ mod tests {
 
     #[test]
     fn gt_k_matches_the_librarys_hash33() {
-        // Cross-checked against the Python helper's own g_tk for this key.
+        // Compatibility vector for the public hash33 behavior.
         let credential = Credential {
             music_id: "1234567890".into(),
             music_key: "abc".into(),

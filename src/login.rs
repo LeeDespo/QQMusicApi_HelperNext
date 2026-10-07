@@ -15,7 +15,7 @@
 //!
 //! The QR flow is stateless between calls on purpose: the `qrsig` the first step
 //! returns is the identifier the caller hands back when polling, so no login
-//! state has to survive in the component (the Python helper did the same).
+//! state has to survive in the component between start and poll calls.
 
 use crate::credential::{hash33, hash33_seeded, Credential, CredentialStore};
 use crate::upstream::{first_text, Platform, Upstream, UpstreamError};

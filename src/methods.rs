@@ -209,8 +209,8 @@ fn catalog_dispatch(
             upstream,
             credential,
             platform,
-            // `name` and `artist` are the spellings the app and the old helper
-            // used; either may be the only thing a caller has.
+            // `name` and `artist` are accepted compatibility spellings;
+            // either may be the only field a caller has.
             &first_text(params, &["name", "artist"]).unwrap_or_default(),
             first_text(params, &["singerMid", "mid"]).as_deref(),
         )
@@ -364,8 +364,7 @@ fn catalog_dispatch(
             &first_text(params, &["name", "artist"]).unwrap_or_default(),
             first_text(params, &["singerMid"]).as_deref(),
         )
-        // `artistDetail`, not `detail`: the app reads the artist page's prose
-        // out of this key, and the Python helper answered with it.
+        // `artistDetail`, not `detail`, is the published protocol key.
         .map(|detail| json!({ "artistDetail": detail })),
         "search_songs" | "search_artists" | "search_albums" | "search_playlists" => {
             let kind = match method {
@@ -1023,8 +1022,7 @@ fn require_login(credential: &Credential) -> Result<(), UpstreamError> {
 ///
 /// Field names differ per endpoint (`mid`/`songmid`, singers as a list, sizes
 /// keyed by code), so the mapping is written against the widest set and every
-/// accessor takes alternatives — the same approach the Python helper's
-/// `_track_payload` used.
+/// accessor accepts the compatible alternatives required by those shapes.
 pub fn decoded_tracks(data: &Value) -> Vec<Value> {
     // Candidate key spellings matter more than they look: the same list of
     // tracks arrives as `songlist` (我喜歡), `songList` (an artist's songs, an

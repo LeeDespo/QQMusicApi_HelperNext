@@ -2,15 +2,15 @@
 //!
 //! One request per line on stdin, one reply per line on stdout; a request is
 //! `{"id", "method", "params"}` and the reply carries the same `id` back. This is
-//! the protocol an app uses when it drives the component as a child process —
-//! the macOS player does exactly that — and it is also the easiest way to probe
+//! the protocol a caller uses when it drives the component as a child process,
+//! and it is also the easiest way to probe
 //! the component by hand:
 //!
 //! ```text
 //! $ echo '{"id":"1","method":"get_helper_info","params":{}}' | qqmusic-helper-next
-//! {"id":"1","ok":true,"helper":{"helperVersion":"0.2.0",…}}
+//! {"id":"1","ok":true,"helper":{"helperVersion":"<component-version>",…}}
 //! $ qqmusic-helper-next --version
-//! qqmusic-helper-next 0.2.0 (protocol 2)
+//! qqmusic-helper-next <component-version> (protocol 2)
 //! ```
 //!
 //! stdout is reserved for protocol JSON; diagnostics go to stderr. The
@@ -247,10 +247,9 @@ fn serve(upstream: &Upstream, request: &Value) -> Value {
 
 /// Attach `ok: true` and the request id.
 ///
-/// The id is not decoration: a host matches a reply to its request by it, so a
-/// reply without one is waited on until the host's timeout. (The Python helper
-/// this replaces shipped one method without it, and the symptom was a
-/// fifteen-second hang with nothing in the logs.)
+/// The id is not decoration: a caller matches a reply to its request by it.
+/// A reply without one cannot be correlated deterministically and may leave
+/// the caller waiting until its timeout.
 fn with_id(id: Value, mut value: Value) -> Value {
     if let Some(object) = value.as_object_mut() {
         // Some methods return a resource ID (a playlist or a new comment).
